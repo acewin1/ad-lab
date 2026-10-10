@@ -177,6 +177,8 @@ table.mini td{padding:6px 10px}
 .adform .h3:first-of-type{margin-top:6px}
 .adform .rules input,.adform .rules select{width:100%}
 .danger-link{color:var(--kill)}
+.adtoggle{display:inline-flex;align-items:center;gap:4px;margin-left:8px;font-size:12px;color:var(--ink-3);cursor:pointer;white-space:nowrap}
+.adtoggle input{accent-color:var(--blue)}
 .cid{display:block;font-size:12px;color:var(--ink-3);font-variant-numeric:tabular-nums;margin-bottom:2px}
 table.mini tr.cur td{font-weight:600;background:var(--blue-soft)}
 .sum-head{display:flex;flex-wrap:wrap;gap:16px;justify-content:space-between;align-items:flex-end}
@@ -246,8 +248,8 @@ svg.trend .v{fill:var(--ink);font-weight:600}
   </aside>
   <main id="view" tabindex="-1"></main>
 </div>
-<div class="drag-veil" id="veil">Drop CSV files to import</div>
-<input type="file" id="file" accept=".csv,text/csv" multiple hidden>
+<div class="drag-veil" id="veil">Drop your sheet to import</div>
+<input type="file" id="file" accept=".csv,text/csv,.xlsx,.xls,.ods" multiple hidden>
 
 <script>
 /* ============ Storage ============ */
@@ -586,13 +588,14 @@ function assignCreativeIds() {
     const k = keyOf(a);
     a.creative_id = (k && byKey.get(k)) || nextCreativeId();
     if (k) byKey.set(k, a.creative_id);
+    if (a.fromCreative) { const c = (state.creatives || []).find((x) => 'cr' + x.id === a.id); if (c && !c.creative_id) c.creative_id = a.creative_id; }
     n++;
   });
   return n;
 }
 const runsOf = (a) => a.creative_id ? state.ads.filter((x) => x.creative_id && x.creative_id.toLowerCase() === a.creative_id.toLowerCase()) : [a];
 function importText(text, name, mode) {
-  const rows = parseCSV(text);
+  const rows = Array.isArray(text) ? text : parseCSV(text);
   const t = readTable(rows);
   if (!t) {
     const found = (rows[0] || []).map((x) => String(x || '').split(/\r?\n/)[0].trim()).filter(Boolean).slice(0, 8);
@@ -601,10 +604,13 @@ function importText(text, name, mode) {
   if (t.type === 'creatives') {
     const items = rowsToCreatives(t.header, t.body, name);
     if (!items.length) return { name, ok: true, kind: 'creatives', msg: 'Your Creatives tab has no rows yet — nothing to bring in.' };
+    const known = new Map((state.creatives || []).map((c) => [c.id, c.creative_id]));
+    items.forEach((c) => { if (!c.creative_id && known.get(c.id)) c.creative_id = known.get(c.id); });
     const r = merge('creatives', items, importMode);
     state.imports.unshift({ name, type: 'creatives', rows: items.length, at: new Date().toISOString() });
     const filled = enrichAds();
     syncCreativeAds();
+    assignCreativeIds();
     const shown = state.ads.filter((x) => x.fromCreative).length;
     return { name, ok: true, kind: 'creatives', msg: `${plural(items.length, 'creative')} imported (${int(r.added)} new)${filled ? `, details filled in on ${plural(filled, 'run')}` : ''}.${shown ? ` ${plural(shown, 'creative')} without runs ${shown === 1 ? 'shows' : 'show'} on the Ads tab with ${shown === 1 ? 'its' : 'their'} totals — import your Runs tab for per-launch detail.` : ''}` };
   }
@@ -653,39 +659,96 @@ function importText(text, name, mode) {
 }
 let importMode = 'merge';
 let lastLog = [];
+// ---- Whole-workbook import (one Excel file, or one "Publish to web" link for the entire sheet) ----
+let xlsxLoading = null;
+function loadXLSX() {
+  if (window.XLSX) return Promise.resolve(window.XLSX);
+  if (!xlsxLoading) xlsxLoading = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+    s.onload = () => (window.XLSX ? resolve(window.XLSX) : reject(new Error('xlsx')));
+    s.onerror = () => { xlsxLoading = null; reject(new Error('xlsx')); };
+    document.head.append(s);
+  });
+  return xlsxLoading;
+}
+async function importWorkbook(buf, name, mode) {
+  const X = await loadXLSX();
+  const wb = X.read(buf, { type: 'array' });
+  const sheets = wb.SheetNames.map((sn) => ({ sn, rows: X.utils.sheet_to_json(wb.Sheets[sn], { header: 1, raw: false, defval: '' }) }));
+  // An old backup log only comes in when the Runs tab is still empty — otherwise the same ads would count twice
+  const runsHasRows = sheets.some(({ rows }) => { const tb = readTable(rows); return tb && tb.type === 'ads' && tb.header.some((h) => /^creative id/.test(norm(h))) && tb.body.some((r) => r.some((c) => String(c).trim())); });
+  // Creatives first so runs pick up their hooks straight away
+  const order = (rows) => { const tb = readTable(rows); return tb && tb.type === 'creatives' ? 0 : 1; };
+  sheets.sort((a, b) => order(a.rows) - order(b.rows));
+  const results = [], skipped = [];
+  for (const { sn, rows } of sheets) {
+    const tb = readTable(rows);
+    if (!tb) { skipped.push(sn); continue; }
+    if (/backup/i.test(sn) && runsHasRows) { skipped.push(sn + ' (Runs has your ads)'); continue; }
+    const r = importText(rows, `${name} › ${sn}`, mode);
+    if (r.ok) results.push(r); else skipped.push(sn);
+  }
+  // the creatives line was written before Runs came in — restate it now that the whole file is in
+  const left = state.ads.filter((x) => x.fromCreative).length;
+  results.forEach((r) => { if (r.kind === 'creatives') r.msg = r.msg.replace(/ \d+ creatives? without runs.*$/, left ? ` ${plural(left, 'creative')} without runs ${left === 1 ? 'shows' : 'show'} with ${left === 1 ? 'its' : 'their'} totals.` : ''); });
+  if (!results.length) results.push({ name, ok: false, msg: 'Didn’t find any tabs the app can read (Runs, Creatives, Spend Log, Daily Journal…).' });
+  if (skipped.length) results.push({ name: `${name} › skipped`, ok: true, kind: 'skip', msg: `Not needed: ${skipped.join(', ')}` });
+  return results;
+}
+const isWorkbookName = (n) => /\.(xlsx|xlsm|xls|ods)$/i.test(n);
 async function importFiles(files) {
   const results = [];
   for (const f of files) {
-    if (!/\.(csv|tsv|txt)$/i.test(f.name) && f.type && !/csv|text/.test(f.type)) { results.push({ name: f.name, ok: false, msg: 'Not a CSV. In Google Sheets use File › Download › Comma-separated values.' }); continue; }
-    try { results.push(importText(await f.text(), f.name, importMode)); }
-    catch (e) { results.push({ name: f.name, ok: false, msg: 'Couldn’t read this file.' }); }
+    try {
+      if (isWorkbookName(f.name)) { results.push(...await importWorkbook(await f.arrayBuffer(), f.name, importMode)); continue; }
+      if (!/\.(csv|tsv|txt)$/i.test(f.name) && f.type && !/csv|text/.test(f.type)) { results.push({ name: f.name, ok: false, msg: 'The app reads CSV or Excel files. In Google Sheets use File › Download › Microsoft Excel (.xlsx) to bring in the whole sheet at once.' }); continue; }
+      results.push(importText(await f.text(), f.name, importMode));
+    } catch (e) {
+      results.push({ name: f.name, ok: false, msg: /xlsx/.test(String(e && e.message)) ? 'Couldn’t load the Excel reader — check your internet connection and try again.' : 'Couldn’t read this file.' });
+    }
   }
   save();
   lastLog = results;
-  const ok = results.filter((r) => r.ok).length;
-  toast(ok ? `Imported ${plural(ok, 'file')}.` : 'Nothing imported — see Import & data for why.');
+  const ok = results.filter((r) => r.ok && r.kind !== 'skip').length;
+  toast(ok ? `Imported ${plural(ok, 'tab')}.` : 'Nothing imported — see Import & data for why.');
   render();
+}
+// Turn whatever Google link was pasted into one the app can fetch
+function syncURL(url) {
+  const u = String(url || '').trim();
+  const m = u.match(/docs\.google\.com\/spreadsheets\/d\/e\/([A-Za-z0-9_-]+)/);
+  if (!m) return null;
+  if (/output=csv|format=csv/.test(u) && /gid=/.test(u)) return u; // a single tab published as CSV
+  return `https://docs.google.com/spreadsheets/d/e/${m[1]}/pub?output=xlsx`; // the whole sheet
 }
 async function syncAll() {
   if (!state.syncs.length) return;
   const results = [];
   for (const s of state.syncs) {
+    const url = syncURL(s.url) || s.url;
     try {
-      const res = await fetch(s.url, { cache: 'no-store' });
+      const res = await fetch(url, { cache: 'no-store' });
       if (!res.ok) throw new Error('HTTP ' + res.status);
-      const text = await res.text();
-      if (/^\s*</.test(text)) throw new Error('html');
-      const r = importText(text, s.label || 'Linked sheet', 'merge');
-      s.last = new Date().toISOString(); s.ok = r.ok; s.msg = r.msg;
-      results.push(r);
+      let rs;
+      if (/output=xlsx/.test(url)) rs = await importWorkbook(await res.arrayBuffer(), s.label || 'My sheet', 'merge');
+      else {
+        const text = await res.text();
+        if (/^\s*</.test(text)) throw new Error('html');
+        rs = [importText(text, s.label || 'Linked sheet', 'merge')];
+      }
+      const good = rs.filter((r) => r.ok && r.kind !== 'skip');
+      s.last = new Date().toISOString(); s.ok = good.length > 0;
+      s.msg = good.length ? `Read ${plural(good.length, 'tab')}` : (rs[0] && rs[0].msg) || '';
+      results.push(...rs);
     } catch (e) {
       s.last = new Date().toISOString(); s.ok = false;
-      s.msg = 'Couldn’t fetch. Make sure it’s a “Publish to web” CSV link, not the normal sheet link.';
+      s.msg = /xlsx/.test(String(e && e.message)) ? 'Couldn’t load the Excel reader — check your internet connection.' : 'Couldn’t fetch it. In Google Sheets, check File › Share › Publish to web says it’s published, then copy that link (not the normal sheet link).';
       results.push({ name: s.label || s.url, ok: false, msg: s.msg });
     }
   }
   save(); lastLog = results; render();
-  toast('Synced linked sheets.');
+  toast(results.some((r) => r.ok && r.kind !== 'skip') ? 'Synced your sheet.' : 'Sync didn’t work — see Import & data.');
 }
 
 /* ============ Metrics ============ */
@@ -715,6 +778,27 @@ function agg(list) {
     cpa: conv ? spend / conv : null, roas: spend ? rev / spend : null, profit: rev - spend, banRate: list.length ? banned / list.length : null,
     epc: clicks ? clickRev / clicks : null, cpc: clicks ? clickSpend / clicks : null };
 }
+// ---- Ad spend from the Spend Log: BC and ad account money counts as ad spend; tools and setup don't ----
+const AD_SPEND_DEFAULT = /(ad ?acc|account|balance|\bbc\b|business cent|transfer|top.?up|ad credit)/i;
+const spendCat = (x) => String((x && x.what) || 'Other').trim().replace(/\s+/g, ' ') || 'Other';
+function isAdSpendCat(cat) {
+  const m = state.rules.adSpendCats || {}, k = String(cat).toLowerCase();
+  return k in m ? !!m[k] : AD_SPEND_DEFAULT.test(cat);
+}
+function spendBetween(from, to) {
+  return state.spend.filter((x) => from == null || (dateKey(x.date) >= from && dateKey(x.date) <= to));
+}
+// headline money for a set of ads plus the Spend Log charges for the same dates
+function money2(ads, charges) {
+  const A = agg(ads);
+  const adCharges = charges.filter((x) => isAdSpendCat(spendCat(x)));
+  const funded = adCharges.reduce((s, x) => s + (x.amount || 0), 0);
+  const cash = charges.reduce((s, x) => s + (x.amount || 0), 0);
+  const fromLog = adCharges.length > 0;
+  const adSpend = fromLog ? funded : A.spend;
+  return { ...A, logged: A.spend, adSpend, fromLog, cash, other: cash - funded,
+    cpa: A.conv ? adSpend / A.conv : null, roas: adSpend ? A.rev / adSpend : null };
+}
 function groupBy(list, keyFn) {
   const m = new Map();
   list.forEach((x) => { [].concat(keyFn(x)).forEach((k) => { if (!m.has(k)) m.set(k, []); m.get(k).push(x); }); });
@@ -743,7 +827,7 @@ function emptyState(title, body, action) {
   const btn = action === 'charge' ? '<button class="btn primary" id="new-charge">Add a charge</button>' : action ? '<button class="btn primary" data-new-ad>Log your first ad</button>' : '';
   return `<div class="panel empty"><h2>${esc(title)}</h2><p class="note">${esc(body)}</p>
     ${btn ? `<div style="margin:4px 0 18px">${btn}</div><p class="small" style="margin:0 0 10px">or import a file</p>` : ''}
-    <div class="drop" data-pick tabindex="0" role="button"><strong>Drop your CSVs here</strong>or click to choose files</div></div>`;
+    <div class="drop" data-pick tabindex="0" role="button"><strong>Drop your sheet here</strong>Excel (.xlsx) or CSV — or click to choose files</div></div>`;
 }
 document.addEventListener('click', (e) => { if (e.target.closest('[data-new-ad]')) openAdForm(); });
 
@@ -752,11 +836,11 @@ function renderOverview() {
   if (!state.ads.length && !state.spend.length) {
     el.innerHTML = `<h1>Your tests, at a glance</h1>
       <p class="lede">Export your creative log and spend log tabs from Google Sheets as CSV and drop them in. Columns are matched by their header names, so any sheet with the same kind of layout works.</p>
-      ${emptyState('No data yet', 'Type in your first ad, or import your sheet: open the tab in Google Sheets, then File › Download › Comma-separated values (.csv).', true)}`;
+      ${emptyState('No data yet', 'Type in your first ad, or bring in your whole sheet: in Google Sheets go to File › Download › Microsoft Excel (.xlsx) and drop the file here.', true)}`;
     bindPick(el); return;
   }
-  const A = agg(state.ads);
-  const cash = state.spend.reduce((s, x) => s + (x.amount || 0), 0);
+  const A = money2(state.ads, state.spend);
+  const cash = A.cash;
   const hasSpendLog = state.spend.length > 0;
   const profit = A.rev - (hasSpendLog ? cash : A.spend);
 
@@ -767,7 +851,8 @@ function renderOverview() {
   // what needs attention
   const ins = [];
   if (A.conv > 0 && A.rev === 0) ins.push(['bad', `<b>${int(A.conv)} conversions, $0 revenue logged.</b> Either the Revenue column isn’t being filled in or those conversions aren’t paying out. Check with your network — every ROAS and verdict depends on it.`]);
-  if (hasSpendLog && cash > 0 && A.spend / cash < 0.5) ins.push(['bad', `<b>Only ${pct(A.spend / cash)} of your cash reached ads.</b> ${usd(A.spend)} logged as ad spend out of ${usd(cash)} spent in total. See Spend for where the rest went.`]);
+  if (A.fromLog && A.adSpend > 0 && A.logged / A.adSpend < 0.6) ins.push(['bad', `<b>You put ${usd(A.adSpend)} into BCs and ad accounts, but only ${usd(A.logged)} shows up as spend on your ads.</b> The other ${usd(A.adSpend - A.logged)} never turned into logged ad spend — check for balances left in accounts that went down, or ads with spend not filled in.`]);
+  if (hasSpendLog && cash > 0 && A.other / cash > 0.3) ins.push(['warn', `<b>${pct(A.other / cash)} of your cash went to tools and setup</b> (${usd(A.other)} on things like proxies and domains). See Spend for the breakdown.`]);
   const lost = A.banned + A.disapproved;
   if (lost) ins.push([lost / A.n > 0.3 ? 'bad' : 'warn', `<b>${int(lost)} of ${int(A.n)} ads ended banned or disapproved</b> (${pct(lost / A.n)}). Open Ads and filter by verdict to see what they have in common.`]);
   const noStatus = state.ads.filter((a) => !a.status).length;
@@ -792,8 +877,8 @@ function renderOverview() {
     <p class="lede">${plural(A.n, 'ad')} across ${plural(groupBy(state.ads, (a) => a.date).size, 'launch day')}. Money flows left to right: what you spent, what reached ads, what converted, what came back.</p>
     <section class="ledger" aria-label="Money trail">
       <div><div class="lab">Cash out</div><div class="num">${hasSpendLog ? usd0(cash) : '—'}</div><div class="sub">${hasSpendLog ? 'every charge in your spend log' : 'import your spend log to see this'}</div></div>
-      <div><div class="lab">Ad spend</div><div class="num">${usd0(A.spend)}</div><div class="sub">${hasSpendLog && cash ? pct(A.spend / cash) + ' of cash out' : 'logged on your ads'}</div></div>
-      <div><div class="lab">Conversions</div><div class="num">${int(A.conv)}</div><div class="sub">true CPA ${A.cpa == null ? '—' : usd(A.cpa)}</div></div>
+      <div><div class="lab">Ad spend</div><div class="num">${usd0(A.adSpend)}</div><div class="sub">${A.fromLog ? `BCs + ad accounts · ${usd0(A.logged)} logged on ads` : 'logged on your ads'}</div></div>
+      <div><div class="lab">Conversions</div><div class="num">${int(A.conv)}</div><div class="sub">true CPA ${A.cpa == null ? '—' : usd(A.cpa)}${A.fromLog ? ' (all ad spend)' : ''}</div></div>
       <div><div class="lab">Revenue</div><div class="num">${usd0(A.rev)}</div><div class="sub">ROAS ${roasFmt(A.roas)}${A.epc != null ? ` · EPC ${usd(A.epc)}` : ''}</div></div>
       <div><div class="lab">Profit</div><div class="num ${profit < 0 ? 'neg' : profit > 0 ? 'pos' : ''}">${usd0(profit)}</div><div class="sub">revenue minus ${hasSpendLog ? 'all cash out' : 'ad spend'}</div></div>
     </section>
@@ -868,7 +953,9 @@ function renderSummary() {
   }
   const days = [...new Set(state.ads.map((a) => a.date).filter(Boolean))].sort((a, b) => dateKey(b) - dateKey(a));
   const P = period(sum.range);
-  const A = agg(P.ads), B = P.prev && P.prev.length ? agg(P.prev) : null;
+  const A = money2(P.ads, spendBetween(sum.range === 'all' ? null : P.from, P.to));
+  const prevRange = P.prev && P.prev.length ? [Math.min(...P.prev.map((a) => dateKey(a.date)).filter(Boolean)), Math.max(...P.prev.map((a) => dateKey(a.date)).filter(Boolean))] : null;
+  const B = P.prev && P.prev.length ? money2(P.prev, prevRange ? spendBetween(prevRange[0], prevRange[1]) : []) : null;
   const lostA = A.n ? (A.banned + A.disapproved) / A.n : null, lostB = B && B.n ? (B.banned + B.disapproved) / B.n : null;
   const vs = B ? `vs ${esc(P.prevLabel)}` : '';
   // keywords for the period
@@ -920,7 +1007,7 @@ function renderSummary() {
     <p class="note" style="margin:8px 0 20px">${esc(P.label)} · ${plural(A.n, 'ad')}${B ? ` · changes are ${vs}` : ''}</p>
 
     <section class="kpis">
-      <div class="kpi"><div class="lab">Ad spend</div><div class="num">${usd0(A.spend)}</div>${B ? delta(A.spend, B.spend, true, usd0) : ''}${state.spend.length ? `<div class="sub">${usd0(cash)} cash out</div>` : ''}</div>
+      <div class="kpi"><div class="lab">Ad spend</div><div class="num">${usd0(A.adSpend)}</div>${B ? delta(A.adSpend, B.adSpend, true, usd0) : ''}<div class="sub">${A.fromLog ? `BCs + ad accounts · ${usd0(A.logged)} logged on ads` : 'logged on your ads'}${state.spend.length ? ` · ${usd0(cash)} cash out` : ''}</div></div>
       <div class="kpi"><div class="lab">Conversions</div><div class="num">${int(A.conv)}</div>${B ? delta(A.conv, B.conv, true, int) : ''}</div>
       <div class="kpi"><div class="lab">True CPA</div><div class="num">${A.cpa == null ? '—' : usd(A.cpa)}</div>${B && B.cpa != null && A.cpa != null ? delta(A.cpa, B.cpa, false, usd) : ''}</div>
       <div class="kpi"><div class="lab">Revenue</div><div class="num">${usd0(A.rev)}</div>${B ? delta(A.rev, B.rev, true, usd0) : ''}<div class="sub">ROAS ${roasFmt(A.roas)}</div></div>
@@ -1661,18 +1748,19 @@ function renderSpend() {
     bindPick(el); bindSpend(); return;
   }
   const total = state.spend.reduce((s, x) => s + (x.amount || 0), 0);
-  const adSpend = state.ads.reduce((s, a) => s + (a.spend || 0), 0);
-  const bars = (m) => { const arr = [...m].map(([k, l]) => [k, l.reduce((s, x) => s + (x.amount || 0), 0), l.length]).sort((a, b) => b[1] - a[1]); const max = Math.max(...arr.map((x) => x[1]), 0.01);
-    return `<div class="bars">${arr.map(([k, v, n]) => `<div class="b"><div>${esc(k)} <span class="small">×${n}</span></div><div class="t"><i style="width:${(100 * v / max).toFixed(1)}%"></i></div><div class="v">${usd(v)}</div></div>`).join('')}</div>`; };
-  const byWhat = groupBy(state.spend, (x) => (x.what || 'Other').trim().replace(/\s+/g, ' '));
+  const M = money2(state.ads, state.spend);
+  const adSpend = M.logged;
+  const bars = (m, toggles) => { const arr = [...m].map(([k, l]) => [k, l.reduce((s, x) => s + (x.amount || 0), 0), l.length]).sort((a, b) => b[1] - a[1]); const max = Math.max(...arr.map((x) => x[1]), 0.01);
+    return `<div class="bars">${arr.map(([k, v, n]) => `<div class="b"><div>${esc(k)} <span class="small">×${n}</span>${toggles ? `<label class="adtoggle"><input type="checkbox" data-adcat="${esc(k)}" ${isAdSpendCat(k) ? 'checked' : ''}> ad spend</label>` : ''}</div><div class="t"><i style="width:${(100 * v / max).toFixed(1)}%;${toggles && !isAdSpendCat(k) ? 'background:var(--ink-3)' : ''}"></i></div><div class="v">${usd(v)}</div></div>`).join('')}</div>`; };
+  const byWhat = groupBy(state.spend, spendCat);
   const byCard = groupBy(state.spend, (x) => x.card || 'Not logged');
   const list = [...state.spend].sort((a, b) => dateKey(b.date) - dateKey(a.date));
   el.innerHTML = `${head}
     ${spendForm.open ? spendFormHTML() : ''}
     ${state.spend.length ? `
-    <p class="lede">${usd(total)} out across ${plural(state.spend.length, 'charge')}${state.ads.length ? `. ${usd(adSpend)} of it shows up as ad spend on your ads (${pct(total ? adSpend / total : null)}).` : '.'}</p>
+    <p class="lede">${usd(total)} out across ${plural(state.spend.length, 'charge')}: <b>${usd(M.adSpend)} ad spend</b> (BCs and ad accounts) and <b>${usd(M.other)} other costs</b>.${state.ads.length && M.fromLog ? ` ${usd(adSpend)} of the ad spend shows up as spend on your ads.` : ''}</p>
     <div class="grid2">
-      <section class="panel"><h2>By what it was for</h2><p class="note">From the What column.</p>${bars(byWhat)}</section>
+      <section class="panel"><h2>By what it was for</h2><p class="note">Ticked categories count as ad spend in your CPA and ROAS. Untick anything that isn’t.</p>${bars(byWhat, true)}</section>
       <section class="panel"><h2>By card</h2><p class="note">From the Card column.</p>${bars(byCard)}</section>
     </div>
     <section style="margin-top:16px"><h2>Every charge</h2><p class="note">Most recent first.</p>
@@ -1684,6 +1772,10 @@ function renderSpend() {
 }
 function bindSpend() {
   const el = $('#view');
+  el.querySelectorAll('[data-adcat]').forEach((cb) => cb.addEventListener('change', () => {
+    state.rules.adSpendCats = { ...(state.rules.adSpendCats || {}), [cb.dataset.adcat.toLowerCase()]: cb.checked };
+    save(); renderSpend(); toast(cb.checked ? `“${cb.dataset.adcat}” now counts as ad spend.` : `“${cb.dataset.adcat}” no longer counts as ad spend.`);
+  }));
   const nb = $('#new-charge'); if (nb) nb.addEventListener('click', () => { spendForm.open = true; spendForm.id = null; renderSpend(); const w = $('#sf-what'); if (w) w.focus(); });
   const c = $('#sf-cancel'); if (c) c.addEventListener('click', () => { spendForm.open = false; spendForm.id = null; renderSpend(); });
   const s = $('#sf-save');
@@ -1719,28 +1811,27 @@ function renderData() {
           <button data-mode="merge" aria-pressed="${importMode === 'merge'}">Add to what’s here</button>
           <button data-mode="replace" aria-pressed="${importMode === 'replace'}">Replace</button>
         </div></div>
-        <div class="drop" data-pick tabindex="0" role="button"><strong>Drop CSVs here</strong>or click to choose files</div>
+        <div class="drop" data-pick tabindex="0" role="button"><strong>Drop your sheet here</strong>Excel (.xlsx) or CSV — or click to choose files</div>
         <p class="note" style="margin-top:12px">${importMode === 'merge' ? 'Ads already here are updated if the same ad is imported again (same date, link and hook), so re-importing a sheet won’t double count.' : 'Each file replaces everything of its kind: a creative log replaces all ads, a spend log replaces all charges.'}</p>
-        ${lastLog.length ? `<ul class="log">${lastLog.map((r) => `<li><span>${esc(r.name)}</span><span class="${r.ok ? 'ok' : 'err'}">${esc(r.msg)}</span></li>`).join('')}</ul>` : ''}
+        ${lastLog.length ? `<ul class="log">${lastLog.map((r) => `<li><span>${esc(r.name)}</span><span class="${r.kind === 'skip' ? 'small' : r.ok ? 'ok' : 'err'}">${esc(r.msg)}</span></li>`).join('')}</ul>` : ''}
       </section>
       <section class="panel">
-        <h2>Getting the CSV out of Google Sheets</h2>
+        <h2>Getting your sheet out of Google Sheets</h2>
         <ol class="steps">
-          <li>Open the tab you want (for example your creative log).</li>
-          <li>File › Download › Comma-separated values (.csv).</li>
-          <li>Repeat for your spend log tab.</li>
-          <li>Drop both files here.</li>
+          <li>In your sheet, go to File › Download › Microsoft Excel (.xlsx).</li>
+          <li>Drop that one file here. The app reads every tab and skips the ones it doesn’t need.</li>
         </ol>
+        <p class="note" style="margin-top:8px">Single tabs downloaded as CSV still work too.</p>
         <p class="note" style="margin-top:12px">Headers it looks for: Date, Ad / Spark link, Hook Text, Hook Style, Status, Spend, Conversions, Revenue, Clicks (or EPC), Parent Creative ID, What Changed, Format, Offer, Campaign Style, Notes. For the spend log: Date, Card, What, Amount. For ban history: Date, Ad account, BC, Reason, What was running, Lesson. For a list of names: Ad account and/or BC. Your Daily Journal tab imports too. If your sheet splits details (Creatives tab) from results (Runs tab), import both — they’re matched by Creative ID.</p>
       </section>
     </div>
 
     <section class="panel" style="margin-top:16px">
-      <h2>Keep a sheet synced</h2>
-      <p class="note">Skip the download step: in Google Sheets go to File › Share › Publish to web, pick the tab, choose Comma-separated values, publish, and paste the link here. Anyone with that link can see the tab, so only do this if you’re fine with that.</p>
+      <h2>Keep your sheet synced</h2>
+      <p class="note">Skip downloading altogether. In Google Sheets go to File › Share › Publish to web, leave everything as it is, click Publish, and paste the link here. The app then pulls your latest data every time you open it. Anyone with that link can see your whole sheet, so don’t share it.</p>
       <div class="toolbar">
-        <input type="url" id="sync-url" placeholder="https://docs.google.com/spreadsheets/d/e/…/pub?output=csv" style="flex:2 1 280px" aria-label="Published CSV link">
-        <input type="text" id="sync-label" placeholder="Name, e.g. Main creative log" style="flex:1 1 160px" aria-label="Name">
+        <input type="url" id="sync-url" placeholder="Paste your Publish to web link" style="flex:2 1 280px" aria-label="Publish to web link">
+        <input type="text" id="sync-label" placeholder="Name, e.g. My sheet" style="flex:1 1 160px" aria-label="Name">
         <button class="btn" id="sync-add">Add link</button>
         <button class="btn primary" id="sync-run" ${state.syncs.length ? '' : 'disabled'}>Sync now</button>
       </div>
@@ -1776,7 +1867,7 @@ function renderData() {
   }));
   $('#sync-add').addEventListener('click', () => {
     const url = $('#sync-url').value.trim();
-    if (!/^https:\/\/docs\.google\.com\/spreadsheets\/.+(output=csv|format=csv)/.test(url)) { toast('Paste the “Publish to web” link with CSV selected — it ends in output=csv.'); return; }
+    if (!syncURL(url)) { toast(/docs\.google\.com\/spreadsheets\/d\//.test(url) ? 'That’s the normal sheet link. Use File › Share › Publish to web, click Publish, and copy the link it gives you.' : 'Paste the link from File › Share › Publish to web in Google Sheets.'); return; }
     state.syncs.push({ url, label: $('#sync-label').value.trim() }); save(); renderData();
   });
   $('#sync-run').addEventListener('click', syncAll);
