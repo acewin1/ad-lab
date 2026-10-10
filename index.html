@@ -164,6 +164,12 @@ table.mini{font-size:13px;background:var(--panel);border:1px solid var(--line);b
 table.mini td{padding:6px 10px}
 .link{all:unset;cursor:pointer;color:var(--blue);margin-right:8px}
 .link:focus-visible{outline:2px solid var(--blue)}
+.plan-card{border-left:4px solid var(--blue);margin-bottom:16px}
+.plan-text{margin:6px 0 0;font-size:16px;line-height:1.55;max-width:70ch}
+.entry-date{font-stretch:75%;font-size:22px;font-weight:700;margin:0}
+.entry-fields{margin:8px 0 0;display:grid;gap:12px}
+.entry-fields dt{font-size:12px;color:var(--ink-3);margin-bottom:2px}
+.entry-fields dd{margin:0;max-width:75ch;line-height:1.55}
 .sum-head{display:flex;flex-wrap:wrap;gap:16px;justify-content:space-between;align-items:flex-end}
 .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,10.5rem),1fr));gap:12px;margin-bottom:16px}
 .kpi{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px}
@@ -222,6 +228,7 @@ svg.trend .v{fill:var(--ink);font-weight:600}
       <button data-view="ads">Ads <span class="count" id="c-ads"></span></button>
       <button data-view="keywords">Keywords</button>
       <button data-view="patterns">Patterns</button>
+      <button data-view="journal">Journal <span class="count" id="c-journal"></span></button>
       <button data-view="bans">Ban log <span class="count" id="c-bans"></span></button>
       <button data-view="spend">Spend <span class="count" id="c-spend"></span></button>
       <button data-view="data">Import &amp; data</button>
@@ -237,7 +244,7 @@ svg.trend .v{fill:var(--ink);font-weight:600}
 /* ============ Storage ============ */
 const STORE = 'adlab.v1';
 const DEFAULT_RULES = { minSpend: 10, winRoas: 1.3, watchRoas: 0.8, minGroup: 10 };
-function blank() { return { ads: [], spend: [], bans: [], names: { accounts: [], bcs: [] }, ignored: [], imports: [], syncs: [], rules: { ...DEFAULT_RULES } }; }
+function blank() { return { ads: [], spend: [], bans: [], journal: [], names: { accounts: [], bcs: [] }, ignored: [], imports: [], syncs: [], rules: { ...DEFAULT_RULES } }; }
 function load() {
   try {
     const s = JSON.parse(localStorage.getItem(STORE));
@@ -377,6 +384,7 @@ function findCols(header, map) {
 }
 function detect(header) {
   const h = header.map(norm), has = (re) => h.some((x) => re.test(x));
+  if (has(/^what i tested/) || has(/^plan for tomorrow/) || has(/^patterns i.?m noticing/)) return 'journal';
   const named = has(/^(advertiser|ad account|account|bc\b|business cent)/);
   if (named && (has(/^(reason|violation|lesson)/) || has(/^(date banned|banned on|ban date)/))) return 'bans';
   if (has(/(amount|charged)/) && !has(/^status/) && !has(/^hook/)) return 'spend';
@@ -441,6 +449,29 @@ function rowsToBans(header, body, source) {
   });
   return out;
 }
+const JOURNAL_FIELDS = [
+  ['tested', 'What I tested today', /^what i tested/, 'Hooks, offers, formats — what was new today'],
+  ['bids', 'Campaign styles / bids used', /^(campaign style|bids?)/, 'e.g. Traffic, lowest cost; Lead gen, cost cap'],
+  ['banned', 'What got disapproved / banned (and what it had in common)', /^what got (disapproved|banned)/, 'What went down and what those ads shared'],
+  ['patterns', 'Patterns I’m noticing', /^patterns/, 'Anything that keeps showing up'],
+  ['plan', 'Plan for tomorrow', /^plan/, 'What you’ll do next — you’ll see this tomorrow'],
+];
+const isoFrom = (s) => { const k = dateKey(s); return k ? String(k).replace(/^(\d{4})(\d{2})(\d{2})$/, '$1-$2-$3') : ''; };
+function rowsToJournal(header, body, source) {
+  const h = header.map(norm);
+  const dateI = h.findIndex((x) => /^date/.test(x));
+  const ix = Object.fromEntries(JOURNAL_FIELDS.map(([k, , re]) => [k, h.findIndex((x) => re.test(x))]));
+  const out = [];
+  body.forEach((r) => {
+    const e = { date: isoFrom(cell(r, dateI)) };
+    JOURNAL_FIELDS.forEach(([k]) => { e[k] = cell(r, ix[k]); });
+    if (!JOURNAL_FIELDS.some(([k]) => e[k])) return; // a date with nothing written isn't an entry
+    e.id = e.date ? 'j' + e.date : hash(JSON.stringify(e));
+    e.source = source;
+    out.push(e);
+  });
+  return out;
+}
 function rowsToNames(header, body) {
   const ix = findCols(header, NAME_COLS), accounts = new Set(), bcs = new Set();
   body.forEach((r) => {
@@ -470,6 +501,13 @@ function importText(text, name, mode) {
   const rows = parseCSV(text);
   const t = readTable(rows);
   if (!t) return { name, ok: false, msg: 'Couldn’t tell what this is. Row 1 needs headers like Status, Spend and Hook Text (ads), Amount and What (spend), Ad account and Reason (ban history) or Ad account / BC (names).' };
+  if (t.type === 'journal') {
+    const items = rowsToJournal(t.header, t.body, name);
+    if (!items.length) return { name, ok: true, kind: 'journal', msg: 'Your journal tab is empty — nothing to bring in yet. Start writing entries on the Journal tab.' };
+    const r = merge('journal', items, importMode);
+    state.imports.unshift({ name, type: 'journal', rows: items.length, at: new Date().toISOString() });
+    return { name, ok: true, kind: 'journal', msg: `${plural(r.added, 'journal entry', 'journal entries')} added, ${int(r.updated)} updated` };
+  }
   if (t.type === 'names') {
     const n = rowsToNames(t.header, t.body);
     if (!n.accounts.length && !n.bcs.length) return { name, ok: false, msg: 'Found the name columns but they’re empty.' };
@@ -569,7 +607,7 @@ function groupBy(list, keyFn) {
 
 /* ============ Views ============ */
 let view = (location.hash.slice(1) || 'summary');
-const VIEWS = { summary: renderSummary, overview: renderOverview, ads: renderAds, keywords: renderKeywords, patterns: renderPatterns, bans: renderBans, spend: renderSpend, data: renderData };
+const VIEWS = { summary: renderSummary, overview: renderOverview, ads: renderAds, keywords: renderKeywords, patterns: renderPatterns, journal: renderJournal, bans: renderBans, spend: renderSpend, data: renderData };
 if (!VIEWS[view]) view = 'summary';
 function go(v) {
   view = v;
@@ -581,6 +619,7 @@ function render() {
   $('#c-ads').textContent = state.ads.length ? int(state.ads.length) : '';
   $('#c-spend').textContent = state.spend.length ? int(state.spend.length) : '';
   $('#c-bans').textContent = state.bans.length ? int(state.bans.length) : '';
+  $('#c-journal').textContent = state.journal.length ? int(state.journal.length) : '';
   VIEWS[view]();
 }
 
@@ -1155,6 +1194,77 @@ function renderPatterns() {
   }));
 }
 
+/* ---- Journal ---- */
+const jr = { date: null, q: '' };
+const todayISO = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+const prettyDate = (iso) => { const k = dateKey(iso); if (!k) return iso || 'No date'; return keyToDate(k).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }); };
+function dayNumbers(iso) {
+  const k = dateKey(iso); if (!k) return '';
+  const ads = state.ads.filter((a) => dateKey(a.date) === k);
+  if (!ads.length) return '';
+  const A = agg(ads);
+  return `${plural(A.n, 'ad')} launched · ${usd(A.spend)} spent · ${plural(A.conv, 'conversion')}${A.cpa != null ? ` at ${usd(A.cpa)}` : ''}${A.banned + A.disapproved ? ` · <span class="neg">${int(A.banned + A.disapproved)} banned or disapproved</span>` : ''}`;
+}
+function renderJournal() {
+  const el = $('#view');
+  if (!jr.date) jr.date = todayISO();
+  const entries = [...state.journal].sort((a, b) => dateKey(b.date) - dateKey(a.date));
+  const current = state.journal.find((e) => e.date === jr.date);
+  const prevPlan = entries.find((e) => e.plan && dateKey(e.date) < dateKey(jr.date));
+  const q = jr.q.toLowerCase();
+  const shown = q ? entries.filter((e) => JOURNAL_FIELDS.some(([k]) => (e[k] || '').toLowerCase().includes(q))) : entries;
+  const numbers = dayNumbers(jr.date);
+  el.innerHTML = `
+    <h1>Journal</h1>
+    <p class="lede">Write down everything you did today: tests, bids, what got banned and what those ads shared. Re-read it the next morning — yesterday’s plan sits right above today’s entry.</p>
+    ${prevPlan ? `<section class="panel plan-card"><h2>Your plan from ${esc(prettyDate(prevPlan.date))}</h2><p class="plan-text">${esc(prevPlan.plan).replace(/\n/g, '<br>')}</p></section>` : ''}
+    <section class="panel" id="j-form">
+      <div class="toolbar" style="justify-content:space-between;align-items:flex-end">
+        <div><h2>${current ? 'Edit entry' : 'New entry'}</h2><p class="note" style="margin:0">${numbers ? 'That day: ' + numbers : 'No ads logged for this day yet.'}</p></div>
+        <label class="field" style="width:auto">Date<input type="date" id="j-date" value="${esc(jr.date)}"></label>
+      </div>
+      <div class="stack" style="gap:12px;margin-top:8px">
+        ${JOURNAL_FIELDS.map(([k, label, , ph]) => `<label class="field">${esc(label)}<textarea id="j-${k}" rows="${k === 'tested' ? 3 : 2}" placeholder="${esc(ph)}">${esc(current ? current[k] : '')}</textarea></label>`).join('')}
+        <div class="toolbar" style="margin:0"><button class="btn primary" id="j-save">${current ? 'Save changes' : 'Save entry'}</button>${current ? '<span class="small">Saving replaces this day’s entry.</span>' : ''}</div>
+      </div>
+    </section>
+    <section style="margin-top:20px">
+      <div class="toolbar" style="justify-content:space-between">
+        <h2 style="margin:0">Past entries</h2>
+        <div class="toolbar" style="margin:0;flex:1 1 280px;justify-content:flex-end">
+          ${entries.length ? `<input type="search" id="j-q" placeholder="Search your journal" aria-label="Search journal" value="${esc(jr.q)}" style="flex:1 1 200px;max-width:320px"><button class="btn" id="j-dl">Download CSV</button>` : ''}
+        </div>
+      </div>
+      ${!entries.length ? `<div class="panel empty"><p class="note" style="margin:0">No entries yet. Write today’s above, or drop your Daily Journal CSV anywhere in the app to bring in past ones.</p></div>` :
+        !shown.length ? `<div class="panel empty"><p class="note" style="margin:0">No entries mention “${esc(jr.q)}”.</p></div>` :
+        `<div class="stack">${shown.map((e) => { const n = dayNumbers(e.date); return `
+          <article class="panel entry">
+            <header class="toolbar" style="justify-content:space-between;margin-bottom:6px">
+              <div><h3 class="entry-date">${esc(prettyDate(e.date))}</h3>${n ? `<p class="small" style="margin:2px 0 0">${n}</p>` : ''}</div>
+              <div class="toolbar" style="margin:0"><button class="btn" data-jedit="${esc(e.date)}">Edit</button><button class="btn danger" data-jdel="${esc(e.id)}">Delete</button></div>
+            </header>
+            <dl class="entry-fields">${JOURNAL_FIELDS.filter(([k]) => e[k]).map(([k, label]) => `<div><dt>${esc(label)}</dt><dd>${esc(e[k]).replace(/\n/g, '<br>')}</dd></div>`).join('')}</dl>
+          </article>`; }).join('')}</div>`}
+    </section>`;
+  $('#j-date').addEventListener('change', (e) => { if (e.target.value) { jr.date = e.target.value; renderJournal(); } });
+  $('#j-save').addEventListener('click', () => {
+    const entry = { id: 'j' + jr.date, date: jr.date };
+    JOURNAL_FIELDS.forEach(([k]) => { entry[k] = $('#j-' + k).value.trim(); });
+    if (!JOURNAL_FIELDS.some(([k]) => entry[k])) { toast('Write something in at least one box first.'); return; }
+    state.journal = state.journal.filter((x) => x.date !== jr.date).concat(entry);
+    save(); toast('Journal entry saved.'); render();
+  });
+  const qi = $('#j-q');
+  if (qi) qi.addEventListener('input', () => { jr.q = qi.value; const pos = qi.selectionStart; renderJournal(); const n = $('#j-q'); n.focus(); n.setSelectionRange(pos, pos); });
+  const dl = $('#j-dl');
+  if (dl) dl.addEventListener('click', () => download('daily-journal.csv', toCSV([['Date', ...JOURNAL_FIELDS.map(([, l]) => l)], ...entries.map((e) => [e.date, ...JOURNAL_FIELDS.map(([k]) => e[k])])]), 'text/csv'));
+  el.querySelectorAll('[data-jedit]').forEach((b) => b.addEventListener('click', () => { jr.date = b.dataset.jedit; renderJournal(); const f = $('#j-form'); if (f && f.scrollIntoView) f.scrollIntoView({ block: 'start' }); }));
+  el.querySelectorAll('[data-jdel]').forEach((b) => b.addEventListener('click', () => {
+    if (!confirm('Delete this journal entry?')) return;
+    state.journal = state.journal.filter((x) => x.id !== b.dataset.jdel); save(); render();
+  }));
+}
+
 /* ---- Ban log ---- */
 const BAN_KINDS = ['Ad disapproved', 'Ad account suspended', 'Business Center banned', 'Other'];
 const STOP = new Set('the a an and or to of in on for with my me i u you ur your is it its this that ts so be bc at by from we our us yall y’all just when how what why not no all'.split(' '));
@@ -1318,7 +1428,7 @@ function renderData() {
           <li>Repeat for your spend log tab.</li>
           <li>Drop both files here.</li>
         </ol>
-        <p class="note" style="margin-top:12px">Headers it looks for: Date, Ad / Spark link, Hook Text, Hook Style, Status, Spend, Conversions, Revenue, Parent Creative ID, What Changed, Format, Offer, Campaign Style, Notes. For the spend log: Date, Card, What, Amount. For ban history: Date, Ad account, BC, Reason, What was running, Lesson. For a list of names: Ad account and/or BC.</p>
+        <p class="note" style="margin-top:12px">Headers it looks for: Date, Ad / Spark link, Hook Text, Hook Style, Status, Spend, Conversions, Revenue, Parent Creative ID, What Changed, Format, Offer, Campaign Style, Notes. For the spend log: Date, Card, What, Amount. For ban history: Date, Ad account, BC, Reason, What was running, Lesson. For a list of names: Ad account and/or BC. Your Daily Journal tab imports too.</p>
       </section>
     </div>
 
@@ -1347,7 +1457,7 @@ function renderData() {
 
     <section class="panel" style="margin-top:16px">
       <h2>Your data</h2>
-      <p class="note">${plural(state.ads.length, 'ad')}, ${plural(state.spend.length, 'charge')} and ${plural(state.bans.length, 'ban log entry', 'ban log entries')}, saved in this browser only. Download a backup to move it to another computer or keep it safe.</p>
+      <p class="note">${plural(state.ads.length, 'ad')}, ${plural(state.spend.length, 'charge')}, ${plural(state.bans.length, 'ban log entry', 'ban log entries')} and ${plural(state.journal.length, 'journal entry', 'journal entries')}, saved in this browser only. Download a backup to move it to another computer or keep it safe.</p>
       <div class="toolbar">
         <button class="btn" id="bk">Download backup</button>
         <button class="btn" id="rs">Restore backup</button>
@@ -1376,7 +1486,7 @@ function renderData() {
     catch { toast('That file isn’t an Ad Lab backup.'); }
   });
   $('#clr').addEventListener('click', () => {
-    if (confirm('Delete every ad, charge, ban log entry and linked sheet saved in this browser? Download a backup first if you might want it back.')) { const rules = state.rules; state = blank(); state.rules = rules; save(); lastLog = []; render(); toast('All data deleted.'); }
+    if (confirm('Delete every ad, charge, ban log entry, journal entry and linked sheet saved in this browser? Download a backup first if you might want it back.')) { const rules = state.rules; state = blank(); state.rules = rules; save(); lastLog = []; render(); toast('All data deleted.'); }
   });
 }
 
