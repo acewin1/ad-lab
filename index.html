@@ -177,6 +177,8 @@ table.mini td{padding:6px 10px}
 .adform .h3:first-of-type{margin-top:6px}
 .adform .rules input,.adform .rules select{width:100%}
 .danger-link{color:var(--kill)}
+.cid{display:block;font-size:12px;color:var(--ink-3);font-variant-numeric:tabular-nums;margin-bottom:2px}
+table.mini tr.cur td{font-weight:600;background:var(--blue-soft)}
 .sum-head{display:flex;flex-wrap:wrap;gap:16px;justify-content:space-between;align-items:flex-end}
 .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,10.5rem),1fr));gap:12px;margin-bottom:16px}
 .kpi{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px}
@@ -558,10 +560,37 @@ function merge(kind, incoming, mode) {
   if (mode === 'replace') { state[kind] = incoming; return { added: incoming.length, updated: 0 }; }
   const map = new Map(state[kind].map((x) => [x.id, x]));
   let added = 0, updated = 0;
-  incoming.forEach((x) => { if (map.has(x.id)) updated++; else added++; map.set(x.id, x); });
+  incoming.forEach((x) => {
+    const old = map.get(x.id);
+    if (old) { updated++; if (kind === 'ads' && !x.creative_id && old.creative_id) x.creative_id = old.creative_id; } else added++;
+    map.set(x.id, x);
+  });
   state[kind] = [...map.values()];
   return { added, updated };
 }
+// ---- Creative IDs: every ad gets one; runs of the same video share it ----
+const linkKey = (u) => { const m = String(u || '').match(/video\/(\d{8,})/); return m ? 'v' + m[1] : String(u || '').trim().toLowerCase().replace(/[?#].*$/, ''); };
+function nextCreativeId() {
+  let max = 0;
+  const all = [...state.ads.map((a) => a.creative_id), ...(state.creatives || []).map((c) => c.creative_id)];
+  all.forEach((id) => { const m = String(id || '').match(/^CR-?(\d+)$/i); if (m) max = Math.max(max, +m[1]); });
+  return 'CR-' + String(max + 1).padStart(3, '0');
+}
+function assignCreativeIds() {
+  const byKey = new Map();
+  const keyOf = (a) => (a.ad ? linkKey(a.ad) : '') || (a.hook ? 'h:' + a.hook.trim().toLowerCase() : '');
+  state.ads.forEach((a) => { const k = keyOf(a); if (a.creative_id && k && !byKey.has(k)) byKey.set(k, a.creative_id); });
+  let n = 0;
+  [...state.ads].sort((x, y) => dateKey(x.date) - dateKey(y.date)).forEach((a) => {
+    if (a.creative_id) return;
+    const k = keyOf(a);
+    a.creative_id = (k && byKey.get(k)) || nextCreativeId();
+    if (k) byKey.set(k, a.creative_id);
+    n++;
+  });
+  return n;
+}
+const runsOf = (a) => a.creative_id ? state.ads.filter((x) => x.creative_id && x.creative_id.toLowerCase() === a.creative_id.toLowerCase()) : [a];
 function importText(text, name, mode) {
   const rows = parseCSV(text);
   const t = readTable(rows);
@@ -615,7 +644,7 @@ function importText(text, name, mode) {
   const kind = t.type === 'ads' ? 'ads' : 'spend';
   const r = merge(kind, items, mode);
   const filled = kind === 'ads' ? enrichAds() : 0;
-  if (kind === 'ads') syncCreativeAds();
+  if (kind === 'ads') { syncCreativeAds(); assignCreativeIds(); }
   const needLib = kind === 'ads' && items.some((a) => a.creative_id && !a.hook) && !(state.creatives || []).length;
   state.imports.unshift({ name, type: kind, rows: items.length, at: new Date().toISOString() });
   state.imports = state.imports.slice(0, 30);
@@ -979,12 +1008,14 @@ function adFormHTML() {
   const dl = (id, arr) => `<datalist id="${id}">${arr.map((x) => `<option value="${esc(x)}">`).join('')}</datalist>`;
   const parents = new Map(); state.ads.forEach((x) => { if (x.ad && !parents.has(x.ad)) parents.set(x.ad, x.hook); });
   const statuses = [...new Set([...STATUS_OPTS, ...distinct('status')])];
-  const title = editing ? 'Edit ad' : adForm.from && adForm.from.parent ? 'New variation' : 'Log an ad';
+  const isRerun = !editing && adForm.from && adForm.from.rerun;
+  const title = editing ? 'Edit ad' : isRerun ? 'Run again' : adForm.from && adForm.from.parent ? 'New variation' : 'Log an ad';
   return `<section class="panel adform" id="ad-form">
     <div class="toolbar" style="justify-content:space-between;margin-bottom:4px"><h2 style="margin:0">${title}</h2><button class="btn" id="af-cancel">Cancel</button></div>
-    <p class="note">${editing ? 'Update the results as they come in. Only the hook or the link is required.' : adForm.from && adForm.from.parent ? 'Copied from the parent ad — change what’s different and tick what changed.' : 'Only the hook or the link is required. Fill in results now or come back with Edit later.'}</p>
+    <p class="note">${editing ? 'Update the results as they come in. Only the hook or the link is required.' : isRerun ? `Same creative (${esc(a.creative_id)}), new launch. Pick the campaign type for this run and fill in results later.` : adForm.from && adForm.from.parent ? 'Copied from the parent ad — change what’s different and tick what changed.' : 'Only the hook or the link is required. Fill in results now or come back with Edit later.'}</p>
     <h3 class="h3">The creative</h3>
     <div class="stack" style="gap:10px">
+      <label class="field" style="max-width:16rem">Creative ID<input type="text" id="af-creative_id" value="${v('creative_id')}" placeholder="Assigned automatically" autocomplete="off"></label>
       <label class="field">Hook text<textarea id="af-hook" rows="2" placeholder="The words on screen in the first seconds">${v('hook')}</textarea></label>
       <div class="rules">
         <label>Date launched<input type="date" id="af-date" value="${esc(isoFrom(a.date) || todayISO())}"></label>
@@ -1039,9 +1070,11 @@ function bindAdForm() {
       spend: money(g('spend')), conversions: count(g('conversions')), revenue: money(g('revenue')), clicks: count(g('clicks')), notes: g('notes'),
       source: existing ? existing.source : 'Typed in',
     };
-    delete rec.fromCreative;
+    delete rec.fromCreative; delete rec.rerun;
+    rec.creative_id = g('creative_id') || (existing && existing.creative_id) || '';
     if (!rec.hook && !rec.ad) { toast('Add the hook or the ad link so you can tell this ad apart later.'); $('#af-hook').focus(); return; }
     if (existing) state.ads = state.ads.map((x) => (x.id === existing.id ? rec : x)); else state.ads.push(rec);
+    assignCreativeIds();
     adForm.open = false; adForm.id = null; adForm.from = null; adsFilter.open = rec.id;
     save(); toast(existing ? 'Ad updated.' : 'Ad saved.'); render();
   };
@@ -1064,7 +1097,7 @@ function renderAds() {
     ${adForm.open ? adFormHTML() : ''}
     ${state.ads.length ? `
     <div class="toolbar" style="${adForm.open ? 'margin-top:20px' : ''}">
-      <input type="search" id="q" placeholder="Search hooks, captions, sounds, notes…" aria-label="Search ads" value="${esc(adsFilter.q)}">
+      <input type="search" id="q" placeholder="Search by Creative ID, hook, or paste a TikTok link…" aria-label="Search ads" value="${esc(adsFilter.q)}">
       <select id="fv" aria-label="Verdict"><option value="">All verdicts</option>${['Winner', 'Watch', 'Too early', 'Kill', 'Disapproved', 'Banned'].map((v) => `<option ${adsFilter.verdict === v ? 'selected' : ''}>${v}</option>`).join('')}</select>
       <select id="fs" aria-label="Status"><option value="">All statuses</option>${statuses.map((s) => `<option ${adsFilter.status === s ? 'selected' : ''}>${esc(s)}</option>`).join('')}</select>
       <select id="fd" aria-label="Launch day"><option value="">All days</option>${dates.map((d) => `<option ${adsFilter.date === d ? 'selected' : ''}>${esc(d)}</option>`).join('')}</select>
@@ -1090,7 +1123,7 @@ function renderAds() {
   const draw = () => {
     const q = adsFilter.q.toLowerCase();
     let rows = state.ads.filter((a) =>
-      (!q || [a.hook, a.caption, a.sound, a.notes, a.visual, a.status, a.offer, a.campaign].join(' ').toLowerCase().includes(q)) &&
+      (!q || [a.creative_id, a.hook, a.caption, a.sound, a.notes, a.visual, a.status, a.offer, a.campaign, a.ad, a.ad ? linkKey(a.ad) : ''].join(' ').toLowerCase().includes(q) || (/video\/\d/.test(q) && a.ad && linkKey(a.ad) === linkKey(q))) &&
       (!adsFilter.verdict || verdict(a).t === adsFilter.verdict) &&
       (!adsFilter.status || (a.status || 'No status') === adsFilter.status) &&
       (!adsFilter.date || a.date === adsFilter.date));
@@ -1119,7 +1152,7 @@ function renderAds() {
       const open = adsFilter.open === a.id;
       return `<tr class="row" data-id="${a.id}" aria-expanded="${open}">
         <td>${esc(a.date)}</td>
-        <td class="hook">${esc(a.hook) || `<span class="muted">${esc(a.creative_id || shortId(a.ad))}</span>`}${a.fromCreative ? ' <span class="tag t-early" title="Totals from your Creatives tab — import Runs for each launch">Creative total</span>' : ''}</td>
+        <td class="hook">${a.creative_id ? `<span class="cid">${esc(a.creative_id)}${runsOf(a).length > 1 ? ` · ${runsOf(a).length} runs` : ''}</span>` : ''}${esc(a.hook) || `<span class="muted">${esc(shortId(a.ad))}</span>`}${a.fromCreative ? ' <span class="tag t-early" title="Totals from your Creatives tab — import Runs for each launch">Creative total</span>' : ''}</td>
         <td class="hide-sm">${esc(a.status) || '<span class="muted">—</span>'}</td>
         <td><span class="tag ${tagClass(v.t)}">${v.t}</span></td>
         <td class="r">${a.spend == null ? '<span class="muted">—</span>' : usd(a.spend)}</td>
@@ -1131,6 +1164,7 @@ function renderAds() {
         ${open ? `<tr class="detail"><td colspan="10">
           <div class="toolbar" style="margin-bottom:12px">
             <button class="btn primary" data-aedit="${a.id}">Edit</button>
+            <button class="btn" data-arerun="${a.id}">Run again</button>
             <button class="btn" data-avar="${a.id}">New variation</button>
             <button class="btn danger" data-adel="${a.id}">Delete</button>
           </div>
@@ -1139,7 +1173,9 @@ function renderAds() {
             ['What changed', esc(a.changed)], ['Offer', esc([a.offer, a.offer_type].filter(Boolean).join(' · '))], ['Format', esc(a.format)], ['Hook style', esc(a.hook_style)],
             ['Visual', esc(a.visual)], ['Sound', esc(a.sound)], ['Caption', esc(a.caption)], ['Campaign / bid', esc(a.campaign)], ['Account / BC', esc(a.account)], ['Clicks', a.clicks == null ? '' : int(a.clicks) + (a.spend && a.clicks ? ` · CPC ${usd(a.spend / a.clicks)}` : '')], ['Launch hour', esc(a.launch_hour)], ['Notes', esc(a.notes)], ['Added from', esc(a.source)]]
             .filter(([, v]) => v).map(([k, v]) => `<div><span>${k}</span>${v.replace(/\n/g, '<br>')}</div>`).join('')}
-        </div></td></tr>` : ''}`;
+        </div>
+        ${runsOf(a).length > 1 ? `<h3 class="h3">All runs of ${esc(a.creative_id)}</h3><table class="mini"><tbody>${runsOf(a).sort((x, y) => dateKey(x.date) - dateKey(y.date)).map((r) => { const c = r.conversions ? (r.spend || 0) / r.conversions : null; return `<tr class="${r.id === a.id ? 'cur' : ''}"><td>${esc(r.date)}</td><td>${esc(r.campaign) || '<span class="muted">no campaign set</span>'}</td><td>${esc(r.status) || '—'}</td><td class="r">${r.spend == null ? '—' : usd(r.spend)}</td><td class="r">${r.conversions == null ? '—' : plural(r.conversions, 'conv.', 'conv.')}</td><td class="r">${c == null ? '—' : usd(c) + ' CPA'}</td><td class="r">${r.clicks ? usd((r.revenue || 0) / r.clicks) + ' EPC' : ''}</td></tr>`; }).join('')}</tbody></table>` : ''}
+        </td></tr>` : ''}`;
     }).join('');
   };
   draw();
@@ -1154,11 +1190,17 @@ function renderAds() {
   }));
   $('#ads-tbl tbody').addEventListener('click', (e) => {
     if (e.target.closest('a')) return;
-    const ed = e.target.closest('[data-aedit]'), va = e.target.closest('[data-avar]'), de = e.target.closest('[data-adel]');
+    const ed = e.target.closest('[data-aedit]'), va = e.target.closest('[data-avar]'), de = e.target.closest('[data-adel]'), rr = e.target.closest('[data-arerun]');
     if (ed) { openAdForm({ id: ed.dataset.aedit }); return; }
+    if (rr) {
+      const src = state.ads.find((x) => x.id === rr.dataset.arerun);
+      const from = { ...src, rerun: true, campaign: '', account: '', launch_hour: '', status: '', spend: null, conversions: null, revenue: null, clicks: null, notes: '', date: mdFromISO(todayISO()) };
+      delete from.id; delete from.fromCreative; openAdForm({ from }); return;
+    }
     if (va) {
       const src = state.ads.find((x) => x.id === va.dataset.avar);
-      const from = { ...src, parent: src.ad || src.parent || '', changed: '', status: '', spend: null, conversions: null, revenue: null, notes: '', ad: '', date: mdFromISO(todayISO()) };
+      const from = { ...src, parent: src.ad || src.parent || '', changed: '', status: '', spend: null, conversions: null, revenue: null, clicks: null, notes: '', ad: '', creative_id: '', date: mdFromISO(todayISO()) };
+      delete from.fromCreative;
       delete from.id; openAdForm({ from }); return;
     }
     if (de) {
@@ -1171,8 +1213,8 @@ function renderAds() {
     adsFilter.open = adsFilter.open === tr.dataset.id ? null : tr.dataset.id; draw();
   });
   $('#dl').addEventListener('click', () => {
-    const cols = ['date', 'hook', 'status', 'spend', 'conversions', 'revenue', 'clicks', 'offer', 'offer_type', 'parent', 'changed', 'format', 'hook_style', 'visual', 'sound', 'caption', 'campaign', 'account', 'launch_hour', 'ad', 'notes'];
-    const head = ['Date', 'Hook Text', 'Status', 'Spend ($)', 'Glitchy Conversions', 'Revenue ($)', 'Clicks', 'Offer', 'Offer Type', 'Parent Creative ID', 'What Changed', 'Format', 'Hook Style', 'Visual Description', 'Sound', 'Caption', 'Campaign Style / Bid', 'Account / BC', 'Launch Hour', 'Ad / Spark ID', 'Notes'];
+    const cols = ['creative_id', 'date', 'hook', 'status', 'spend', 'conversions', 'revenue', 'clicks', 'offer', 'offer_type', 'parent', 'changed', 'format', 'hook_style', 'visual', 'sound', 'caption', 'campaign', 'account', 'launch_hour', 'ad', 'notes'];
+    const head = ['Creative ID', 'Date', 'Hook Text', 'Status', 'Spend ($)', 'Glitchy Conversions', 'Revenue ($)', 'Clicks', 'Offer', 'Offer Type', 'Parent Creative ID', 'What Changed', 'Format', 'Hook Style', 'Visual Description', 'Sound', 'Caption', 'Campaign Style / Bid', 'Account / BC', 'Launch Hour', 'Ad / Spark ID', 'Notes'];
     download('ads.csv', toCSV([[...head, 'Verdict'], ...state.ads.map((a) => [...cols.map((c) => a[c]), verdict(a).t])]), 'text/csv');
   });
 }
@@ -1724,7 +1766,7 @@ function renderData() {
         <button class="btn" id="rs">Restore backup</button>
         <button class="btn danger" id="clr">Delete all data</button>
       </div>
-      ${state.imports.length ? `<ul class="log">${state.imports.slice(0, 8).map((i) => `<li><span>${esc(i.name)}</span><span class="small">${plural(i.rows, i.type === 'ads' ? 'ad' : 'charge')} · ${new Date(i.at).toLocaleString()}</span></li>`).join('')}</ul>` : ''}
+      ${state.imports.length ? `<ul class="log">${state.imports.slice(0, 8).map((i) => `<li><span>${esc(i.name)}</span><span class="small">${plural(i.rows, ...({ ads: ['ad'], spend: ['charge'], journal: ['journal entry', 'journal entries'], creatives: ['creative'], bans: ['ban log entry', 'ban log entries'], names: ['name'] }[i.type] || ['row']))} · ${new Date(i.at).toLocaleString()}</span></li>`).join('')}</ul>` : ''}
       <input type="file" id="rs-file" accept=".json,application/json" hidden>
     </section>`;
   bindPick(el);
@@ -1778,7 +1820,8 @@ window.addEventListener('drop', (e) => {
   const files = [...(e.dataTransfer?.files || [])]; if (files.length) importFiles(files);
 });
 
-if ((state.creatives || []).length) { syncCreativeAds(); save(); }
+if ((state.creatives || []).length) syncCreativeAds();
+if (state.ads.length && assignCreativeIds() || (state.creatives || []).length) save();
 if (!canSave) $('#saved-note').textContent = 'This preview can’t save. Download the file and open it in your browser to keep your data.';
 render();
 if (state.syncs.length) syncAll();
