@@ -484,6 +484,7 @@ const CREATIVE_COLS = {
   creative_id: /^creative id/, ad: /^creative link/, date: /^(date created|date)/, offer: /^offer$/, offer_type: /^offer type/,
   parent: /^parent/, changed: /^what changed/, stayed: /^what stayed/, format: /^format/, slides: /^# ?slides/,
   hook: /^hook( text)?$/, hook_style: /^hook style/, visual: /^visual/, sound: /^sound/, caption: /^caption/, notes: /^notes/,
+  total_spend: /^total spend/, total_conv: /^total conv/, total_rev: /^total rev/,
 };
 function rowsToCreatives(header, body, source) {
   const ix = findCols(header, CREATIVE_COLS), out = [];
@@ -492,6 +493,7 @@ function rowsToCreatives(header, body, source) {
     for (const k of Object.keys(CREATIVE_COLS)) c[k] = cell(r, ix[k]);
     if (!c.creative_id && !c.hook) return;
     c.id = 'c' + (c.creative_id || hash(c.hook + c.ad));
+    c.total_spend = money(c.total_spend); c.total_conv = count(c.total_conv); c.total_rev = money(c.total_rev);
     c.source = source;
     out.push(c);
   });
@@ -512,6 +514,22 @@ function enrichAds() {
     if (hit) n++;
   });
   return n;
+}
+// A creative with no runs imported shows on the Ads tab as one row with its totals.
+// As soon as a run for that Creative ID exists, the total row is dropped so nothing is counted twice.
+function syncCreativeAds() {
+  const runIds = new Set(state.ads.filter((a) => !a.fromCreative && a.creative_id).map((a) => String(a.creative_id).trim().toLowerCase()));
+  state.ads = state.ads.filter((a) => !a.fromCreative);
+  (state.creatives || []).forEach((c) => {
+    const key = String(c.creative_id || '').trim().toLowerCase();
+    if (key && runIds.has(key)) return;
+    state.ads.push({
+      id: 'cr' + c.id, fromCreative: true, creative_id: c.creative_id, date: c.date, ad: c.ad, offer: c.offer, offer_type: c.offer_type,
+      parent: c.parent, changed: c.changed, format: c.format, hook: c.hook, hook_style: c.hook_style, visual: c.visual, sound: c.sound,
+      caption: c.caption, notes: c.notes, status: '', campaign: '', account: '', launch_hour: '',
+      spend: c.total_spend, conversions: c.total_conv, revenue: c.total_rev, source: (c.source || 'Creatives tab') + ' (totals)',
+    });
+  });
 }
 function rowsToNames(header, body) {
   const ix = findCols(header, NAME_COLS), accounts = new Set(), bcs = new Set();
@@ -551,8 +569,9 @@ function importText(text, name, mode) {
     const r = merge('creatives', items, importMode);
     state.imports.unshift({ name, type: 'creatives', rows: items.length, at: new Date().toISOString() });
     const filled = enrichAds();
-    const runs = state.ads.some((a) => a.creative_id);
-    return { name, ok: true, kind: 'creatives', msg: `${plural(items.length, 'creative')} saved to your library (${int(r.added)} new)${filled ? `, details filled in on ${plural(filled, 'ad')}` : ''}.${runs ? '' : ' Now import your Runs tab — that’s where spend and results live.'}` };
+    syncCreativeAds();
+    const shown = state.ads.filter((x) => x.fromCreative).length;
+    return { name, ok: true, kind: 'creatives', msg: `${plural(items.length, 'creative')} imported (${int(r.added)} new)${filled ? `, details filled in on ${plural(filled, 'run')}` : ''}.${shown ? ` ${plural(shown, 'creative')} without runs ${shown === 1 ? 'shows' : 'show'} on the Ads tab with ${shown === 1 ? 'its' : 'their'} totals — import your Runs tab for per-launch detail.` : ''}` };
   }
   if (t.type === 'journal') {
     const items = rowsToJournal(t.header, t.body, name);
@@ -590,6 +609,7 @@ function importText(text, name, mode) {
   const kind = t.type === 'ads' ? 'ads' : 'spend';
   const r = merge(kind, items, mode);
   const filled = kind === 'ads' ? enrichAds() : 0;
+  if (kind === 'ads') syncCreativeAds();
   const needLib = kind === 'ads' && items.some((a) => a.creative_id && !a.hook) && !(state.creatives || []).length;
   state.imports.unshift({ name, type: kind, rows: items.length, at: new Date().toISOString() });
   state.imports = state.imports.slice(0, 30);
@@ -1005,6 +1025,7 @@ function bindAdForm() {
       spend: money(g('spend')), conversions: count(g('conversions')), revenue: money(g('revenue')), notes: g('notes'),
       source: existing ? existing.source : 'Typed in',
     };
+    delete rec.fromCreative;
     if (!rec.hook && !rec.ad) { toast('Add the hook or the ad link so you can tell this ad apart later.'); $('#af-hook').focus(); return; }
     if (existing) state.ads = state.ads.map((x) => (x.id === existing.id ? rec : x)); else state.ads.push(rec);
     adForm.open = false; adForm.id = null; adForm.from = null; adsFilter.open = rec.id;
@@ -1023,7 +1044,7 @@ function renderAds() {
   const statuses = [...new Set(state.ads.map((a) => a.status || 'No status'))].sort();
   const dates = [...new Set(state.ads.map((a) => a.date).filter(Boolean))].sort((a, b) => dateKey(b) - dateKey(a));
   el.innerHTML = `
-    <div class="sum-head"><div><h1>Ads</h1><p class="lede" style="margin-bottom:0">Every ad you’ve logged. Click a row to see its details, edit it, or make a variation.</p></div>
+    <div class="sum-head"><div><h1>Ads</h1><p class="lede" style="margin-bottom:0">One row per launch, with its results. Everything on Summary, Keywords and Patterns is worked out from these rows. Click a row to see details, edit it, or make a variation.</p></div>
       ${adForm.open ? '' : '<button class="btn primary" id="new-ad">Log an ad</button>'}</div>
     <div style="height:20px"></div>
     ${adForm.open ? adFormHTML() : ''}
@@ -1082,7 +1103,7 @@ function renderAds() {
       const open = adsFilter.open === a.id;
       return `<tr class="row" data-id="${a.id}" aria-expanded="${open}">
         <td>${esc(a.date)}</td>
-        <td class="hook">${esc(a.hook) || `<span class="muted">${esc(shortId(a.ad))}</span>`}</td>
+        <td class="hook">${esc(a.hook) || `<span class="muted">${esc(a.creative_id || shortId(a.ad))}</span>`}${a.fromCreative ? ' <span class="tag t-early" title="Totals from your Creatives tab — import Runs for each launch">Creative total</span>' : ''}</td>
         <td class="hide-sm">${esc(a.status) || '<span class="muted">—</span>'}</td>
         <td><span class="tag ${tagClass(v.t)}">${v.t}</span></td>
         <td class="r">${a.spend == null ? '<span class="muted">—</span>' : usd(a.spend)}</td>
@@ -1125,6 +1146,8 @@ function renderAds() {
     }
     if (de) {
       if (!confirm('Delete this ad? This can’t be undone (unless you have a backup).')) return;
+      const gone = state.ads.find((x) => x.id === de.dataset.adel);
+      if (gone && gone.fromCreative) state.creatives = (state.creatives || []).filter((c) => 'cr' + c.id !== gone.id);
       state.ads = state.ads.filter((x) => x.id !== de.dataset.adel); adsFilter.open = null; save(); render(); toast('Ad deleted.'); return;
     }
     const tr = e.target.closest('tr.row'); if (!tr) return;
@@ -1737,6 +1760,7 @@ window.addEventListener('drop', (e) => {
   const files = [...(e.dataTransfer?.files || [])]; if (files.length) importFiles(files);
 });
 
+if ((state.creatives || []).length) { syncCreativeAds(); save(); }
 if (!canSave) $('#saved-note').textContent = 'This preview can’t save. Download the file and open it in your browser to keep your data.';
 render();
 if (state.syncs.length) syncAll();
