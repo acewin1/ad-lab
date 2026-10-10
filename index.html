@@ -362,6 +362,8 @@ const AD_COLS = {
   spend: /^spend/,
   conversions: /(conversion|postback|^conv)/,
   revenue: /^revenue/,
+  clicks: /^(link )?clicks/,
+  epc: /^epc/,
   notes: /^notes/,
 };
 const SPEND_COLS = {
@@ -417,6 +419,10 @@ function rowsToAds(header, body, source) {
     for (const k of Object.keys(AD_COLS)) a[k] = cell(r, ix[k]);
     if (!a.date && !a.ad && !a.hook) return;
     a.spend = money(a.spend); a.conversions = count(a.conversions); a.revenue = money(a.revenue);
+    a.clicks = count(a.clicks); a.epc = money(a.epc);
+    // a sheet with EPC but no clicks: work clicks back out of revenue ÷ EPC
+    if (a.clicks == null && a.epc && a.revenue) a.clicks = Math.round(a.revenue / a.epc);
+    delete a.epc;
     a.source = source;
     a.id = hash([a.date, a.ad || a.creative_id, a.hook, a.campaign].join('|'));
     out.push(a);
@@ -671,8 +677,14 @@ function agg(list) {
   const conv = list.reduce((s, a) => s + (a.conversions || 0), 0);
   const rev = list.reduce((s, a) => s + (a.revenue || 0), 0);
   const banned = list.filter(isBanned).length;
-  return { n: list.length, spend, conv, rev, banned, disapproved: list.filter(isDisapproved).length,
-    cpa: conv ? spend / conv : null, roas: spend ? rev / spend : null, profit: rev - spend, banRate: list.length ? banned / list.length : null };
+  // EPC and CPC only use ads that have clicks logged, so a missing number doesn't drag them down
+  const withClicks = list.filter((a) => (a.clicks || 0) > 0);
+  const clicks = withClicks.reduce((s, a) => s + a.clicks, 0);
+  const clickRev = withClicks.reduce((s, a) => s + (a.revenue || 0), 0);
+  const clickSpend = withClicks.reduce((s, a) => s + (a.spend || 0), 0);
+  return { n: list.length, spend, conv, rev, banned, disapproved: list.filter(isDisapproved).length, clicks,
+    cpa: conv ? spend / conv : null, roas: spend ? rev / spend : null, profit: rev - spend, banRate: list.length ? banned / list.length : null,
+    epc: clicks ? clickRev / clicks : null, cpc: clicks ? clickSpend / clicks : null };
 }
 function groupBy(list, keyFn) {
   const m = new Map();
@@ -753,7 +765,7 @@ function renderOverview() {
       <div><div class="lab">Cash out</div><div class="num">${hasSpendLog ? usd0(cash) : '—'}</div><div class="sub">${hasSpendLog ? 'every charge in your spend log' : 'import your spend log to see this'}</div></div>
       <div><div class="lab">Ad spend</div><div class="num">${usd0(A.spend)}</div><div class="sub">${hasSpendLog && cash ? pct(A.spend / cash) + ' of cash out' : 'logged on your ads'}</div></div>
       <div><div class="lab">Conversions</div><div class="num">${int(A.conv)}</div><div class="sub">true CPA ${A.cpa == null ? '—' : usd(A.cpa)}</div></div>
-      <div><div class="lab">Revenue</div><div class="num">${usd0(A.rev)}</div><div class="sub">ROAS ${roasFmt(A.roas)}</div></div>
+      <div><div class="lab">Revenue</div><div class="num">${usd0(A.rev)}</div><div class="sub">ROAS ${roasFmt(A.roas)}${A.epc != null ? ` · EPC ${usd(A.epc)}` : ''}</div></div>
       <div><div class="lab">Profit</div><div class="num ${profit < 0 ? 'neg' : profit > 0 ? 'pos' : ''}">${usd0(profit)}</div><div class="sub">revenue minus ${hasSpendLog ? 'all cash out' : 'ad spend'}</div></div>
     </section>
     <div class="grid2">
@@ -883,6 +895,7 @@ function renderSummary() {
       <div class="kpi"><div class="lab">Conversions</div><div class="num">${int(A.conv)}</div>${B ? delta(A.conv, B.conv, true, int) : ''}</div>
       <div class="kpi"><div class="lab">True CPA</div><div class="num">${A.cpa == null ? '—' : usd(A.cpa)}</div>${B && B.cpa != null && A.cpa != null ? delta(A.cpa, B.cpa, false, usd) : ''}</div>
       <div class="kpi"><div class="lab">Revenue</div><div class="num">${usd0(A.rev)}</div>${B ? delta(A.rev, B.rev, true, usd0) : ''}<div class="sub">ROAS ${roasFmt(A.roas)}</div></div>
+      <div class="kpi"><div class="lab">EPC</div><div class="num">${A.epc == null ? '—' : usd(A.epc)}</div>${B && B.epc != null && A.epc != null ? delta(A.epc, B.epc, true, usd) : ''}<div class="sub">${A.clicks ? `${int(A.clicks)} clicks · CPC ${usd(A.cpc)}` : 'log clicks to see this'}</div></div>
       <div class="kpi"><div class="lab">Banned or disapproved</div><div class="num ${lostA >= 0.3 ? 'neg' : ''}">${pct(lostA)}</div>${lostB != null && lostA != null ? delta(lostA, lostB, false, pct) : ''}<div class="sub">${int(A.banned + A.disapproved)} of ${int(A.n)} ads</div></div>
     </section>
 
@@ -1001,6 +1014,7 @@ function adFormHTML() {
       <label>Spend ($)<input type="number" id="af-spend" min="0" step="0.01" inputmode="decimal" value="${n('spend')}"></label>
       <label>Conversions (postbacks)<input type="number" id="af-conversions" min="0" step="1" inputmode="numeric" value="${n('conversions')}"></label>
       <label>Revenue ($)<input type="number" id="af-revenue" min="0" step="0.01" inputmode="decimal" value="${n('revenue')}"></label>
+      <label>Clicks<input type="number" id="af-clicks" min="0" step="1" inputmode="numeric" value="${n('clicks')}"></label>
     </div>
     <label class="field" style="margin-top:10px">Notes<textarea id="af-notes" rows="2">${v('notes')}</textarea></label>
     <div class="toolbar" style="margin:14px 0 0"><button class="btn primary" id="af-save">${editing ? 'Save changes' : 'Save ad'}</button><span class="small">Ctrl/⌘ + Enter saves</span></div>
@@ -1022,7 +1036,7 @@ function bindAdForm() {
       changed: [...document.querySelectorAll('[name="af-changed"]:checked')].map((c) => c.value).join(', '),
       format: g('format'), hook: g('hook'), hook_style: g('hook_style'), visual: g('visual'), sound: g('sound'), caption: g('caption'),
       campaign: g('campaign'), account: g('account'), launch_hour: g('launch_hour'), status: g('status'),
-      spend: money(g('spend')), conversions: count(g('conversions')), revenue: money(g('revenue')), notes: g('notes'),
+      spend: money(g('spend')), conversions: count(g('conversions')), revenue: money(g('revenue')), clicks: count(g('clicks')), notes: g('notes'),
       source: existing ? existing.source : 'Typed in',
     };
     delete rec.fromCreative;
@@ -1068,6 +1082,7 @@ function renderAds() {
         <th data-k="cpa" class="r"><button>CPA</button></th>
         <th data-k="revenue" class="r hide-sm"><button>Revenue</button></th>
         <th data-k="roas" class="r hide-sm"><button>ROAS</button></th>
+        <th data-k="epc" class="r hide-sm"><button>EPC</button></th>
       </tr></thead><tbody></tbody></table></div>` : ''}`;
   bindAdForm();
   const nb = $('#new-ad'); if (nb) nb.addEventListener('click', () => openAdForm());
@@ -1084,6 +1099,7 @@ function renderAds() {
         case 'date': return dateKey(a.date);
         case 'cpa': return a.conversions ? (a.spend || 0) / a.conversions : null;
         case 'roas': return a.spend ? (a.revenue || 0) / a.spend : null;
+        case 'epc': return a.clicks ? (a.revenue || 0) / a.clicks : null;
         case 'verdict': return verdict(a).t;
         default: return a[adsFilter.sort];
       }
@@ -1097,7 +1113,7 @@ function renderAds() {
     $('#ads-sum').textContent = `${plural(rows.length, 'ad')} · ${usd(S.spend)} spent · ${int(S.conv)} conversions · CPA ${S.cpa == null ? '—' : usd(S.cpa)}`;
     document.querySelectorAll('#ads-tbl th').forEach((th) => th.setAttribute('aria-sort', th.dataset.k === adsFilter.sort ? (adsFilter.dir > 0 ? 'ascending' : 'descending') : 'none'));
     const tb = $('#ads-tbl tbody');
-    if (!rows.length) { tb.innerHTML = `<tr><td colspan="9" class="empty">No ads match. Clear a filter to see more.</td></tr>`; return; }
+    if (!rows.length) { tb.innerHTML = `<tr><td colspan="10" class="empty">No ads match. Clear a filter to see more.</td></tr>`; return; }
     tb.innerHTML = rows.map((a) => {
       const v = verdict(a), cpa = a.conversions ? (a.spend || 0) / a.conversions : null, roas = a.spend ? (a.revenue || 0) / a.spend : null;
       const open = adsFilter.open === a.id;
@@ -1110,8 +1126,9 @@ function renderAds() {
         <td class="r">${a.conversions == null ? '<span class="muted">—</span>' : int(a.conversions)}</td>
         <td class="r">${cpa == null ? '<span class="muted">—</span>' : usd(cpa)}</td>
         <td class="r hide-sm">${a.revenue == null ? '<span class="muted">—</span>' : usd(a.revenue)}</td>
-        <td class="r hide-sm">${roasFmt(roas)}</td></tr>
-        ${open ? `<tr class="detail"><td colspan="9">
+        <td class="r hide-sm">${roasFmt(roas)}</td>
+        <td class="r hide-sm">${a.clicks ? usd((a.revenue || 0) / a.clicks) : '<span class="muted">—</span>'}</td></tr>
+        ${open ? `<tr class="detail"><td colspan="10">
           <div class="toolbar" style="margin-bottom:12px">
             <button class="btn primary" data-aedit="${a.id}">Edit</button>
             <button class="btn" data-avar="${a.id}">New variation</button>
@@ -1120,7 +1137,7 @@ function renderAds() {
           <div class="kv">
           ${[['Link', a.ad ? `<a href="${esc(a.ad)}" target="_blank" rel="noopener">${esc(a.ad)}</a>` : ''], ['Parent creative', a.parent ? `<a href="${esc(a.parent)}" target="_blank" rel="noopener">${esc(shortId(a.parent))}</a>` : 'Original'],
             ['What changed', esc(a.changed)], ['Offer', esc([a.offer, a.offer_type].filter(Boolean).join(' · '))], ['Format', esc(a.format)], ['Hook style', esc(a.hook_style)],
-            ['Visual', esc(a.visual)], ['Sound', esc(a.sound)], ['Caption', esc(a.caption)], ['Campaign / bid', esc(a.campaign)], ['Account / BC', esc(a.account)], ['Launch hour', esc(a.launch_hour)], ['Notes', esc(a.notes)], ['Added from', esc(a.source)]]
+            ['Visual', esc(a.visual)], ['Sound', esc(a.sound)], ['Caption', esc(a.caption)], ['Campaign / bid', esc(a.campaign)], ['Account / BC', esc(a.account)], ['Clicks', a.clicks == null ? '' : int(a.clicks) + (a.spend && a.clicks ? ` · CPC ${usd(a.spend / a.clicks)}` : '')], ['Launch hour', esc(a.launch_hour)], ['Notes', esc(a.notes)], ['Added from', esc(a.source)]]
             .filter(([, v]) => v).map(([k, v]) => `<div><span>${k}</span>${v.replace(/\n/g, '<br>')}</div>`).join('')}
         </div></td></tr>` : ''}`;
     }).join('');
@@ -1154,8 +1171,8 @@ function renderAds() {
     adsFilter.open = adsFilter.open === tr.dataset.id ? null : tr.dataset.id; draw();
   });
   $('#dl').addEventListener('click', () => {
-    const cols = ['date', 'hook', 'status', 'spend', 'conversions', 'revenue', 'offer', 'offer_type', 'parent', 'changed', 'format', 'hook_style', 'visual', 'sound', 'caption', 'campaign', 'account', 'launch_hour', 'ad', 'notes'];
-    const head = ['Date', 'Hook Text', 'Status', 'Spend ($)', 'Glitchy Conversions', 'Revenue ($)', 'Offer', 'Offer Type', 'Parent Creative ID', 'What Changed', 'Format', 'Hook Style', 'Visual Description', 'Sound', 'Caption', 'Campaign Style / Bid', 'Account / BC', 'Launch Hour', 'Ad / Spark ID', 'Notes'];
+    const cols = ['date', 'hook', 'status', 'spend', 'conversions', 'revenue', 'clicks', 'offer', 'offer_type', 'parent', 'changed', 'format', 'hook_style', 'visual', 'sound', 'caption', 'campaign', 'account', 'launch_hour', 'ad', 'notes'];
+    const head = ['Date', 'Hook Text', 'Status', 'Spend ($)', 'Glitchy Conversions', 'Revenue ($)', 'Clicks', 'Offer', 'Offer Type', 'Parent Creative ID', 'What Changed', 'Format', 'Hook Style', 'Visual Description', 'Sound', 'Caption', 'Campaign Style / Bid', 'Account / BC', 'Launch Hour', 'Ad / Spark ID', 'Notes'];
     download('ads.csv', toCSV([[...head, 'Verdict'], ...state.ads.map((a) => [...cols.map((c) => a[c]), verdict(a).t])]), 'text/csv');
   });
 }
@@ -1222,7 +1239,7 @@ function keywordStats(ads, mode, src) {
     const smoothed = (s.conv + m * base) / (exposure + m);
     rows.push({
       key: e.key, word: [...e.spell].sort((x, y) => y[1] - x[1])[0][0], phrase: e.key.includes(' '),
-      n: s.n, spend: s.spend, conv: s.conv, rev: s.rev, cpa: s.cpa, roas: s.roas,
+      n: s.n, spend: s.spend, conv: s.conv, rev: s.rev, cpa: s.cpa, roas: s.roas, epc: s.epc,
       cpaRest: restConv ? restSpend / restConv : null,
       lost: (s.banned + s.disapproved) / s.n,
       lift: base ? smoothed / base : null, rawLift: base ? rate / base : null,
@@ -1297,7 +1314,7 @@ function renderKeywords() {
     </div>
     <div class="tbl-wrap"><table id="kw-tbl">
       <thead><tr>
-        ${[['word', 'Keyword', ''], ['n', 'Ads', 'r'], ['spend', 'Spend', 'r hide-sm'], ['conv', 'Conv.', 'r'], ['cpa', 'CPA', 'r'], ['cpaRest', 'CPA without it', 'r hide-sm'], ['lift', 'Score', ''], ['roas', 'ROAS', 'r hide-sm'], ['lost', 'Banned / disapproved', 'r hide-sm']]
+        ${[['word', 'Keyword', ''], ['n', 'Ads', 'r'], ['spend', 'Spend', 'r hide-sm'], ['conv', 'Conv.', 'r'], ['cpa', 'CPA', 'r'], ['cpaRest', 'CPA without it', 'r hide-sm'], ['lift', 'Score', ''], ['roas', 'ROAS', 'r hide-sm'], ['epc', 'EPC', 'r hide-sm'], ['lost', 'Banned / disapproved', 'r hide-sm']]
           .map(([k, l, c]) => `<th class="${c}" data-k="${k}" aria-sort="${kw.sort === k ? (kw.dir > 0 ? 'ascending' : 'descending') : 'none'}"><button>${l}</button></th>`).join('')}
       </tr></thead>
       <tbody>${rows.length ? rows.map((r) => `
@@ -1310,12 +1327,13 @@ function renderKeywords() {
           <td class="r hide-sm">${r.cpaRest == null ? '<span class="muted">—</span>' : usd(r.cpaRest)}</td>
           <td>${liftBar(r.lift)}</td>
           <td class="r hide-sm">${roasFmt(r.roas)}</td>
+          <td class="r hide-sm">${r.epc == null ? '<span class="muted">—</span>' : usd(r.epc)}</td>
           <td class="r hide-sm ${r.lost >= 0.5 ? 'neg' : ''}">${pct(r.lost)}</td>
         </tr>
-        ${kw.open === r.key ? `<tr class="detail"><td colspan="9">
+        ${kw.open === r.key ? `<tr class="detail"><td colspan="10">
           <div class="toolbar" style="justify-content:space-between;margin-bottom:8px"><b>${plural(r.n, 'ad')} using “${esc(r.word)}”</b><button class="btn" data-ignore="${esc(r.key)}">Ignore this keyword</button></div>
           <table class="mini"><tbody>${[...r.ads].sort((a, b) => (b.conversions || 0) - (a.conversions || 0)).map((a) => `<tr><td>${esc(a.date)}</td><td>${highlight(a.hook, r.key)}</td><td class="r">${a.spend == null ? '—' : usd(a.spend)}</td><td class="r">${a.conversions == null ? '—' : plural(a.conversions, 'conv.', 'conv.')}</td><td>${esc(a.status)}</td></tr>`).join('')}</tbody></table>
-        </td></tr>` : ''}`).join('') : `<tr><td colspan="9" class="empty">No word shows up in 2 or more ads in this range yet.</td></tr>`}</tbody>
+        </td></tr>` : ''}`).join('') : `<tr><td colspan="10" class="empty">No word shows up in 2 or more ads in this range yet.</td></tr>`}</tbody>
     </table></div>
     <p class="note" style="margin-top:12px">How the score works: conversions ÷ spend for ads with the keyword, divided by the same for all ads in the range. Keywords with little spend behind them are pulled toward 1× (as if they had ${useSpend ? usd(Math.max(1, state.rules.minSpend || 10)) : '3 ads'} of average results added), so one lucky ad can’t top the list. “Thin” = under 5 ads, “Early read” = 5–9, “Solid” = 10+. Spellings like “qiuiz” and “qiuizz” count as one word.</p>`}
     ${(state.ignored || []).length ? `<p class="note">Ignored: ${state.ignored.map((k) => `<button class="link" data-unignore="${esc(k)}">${esc(k)} ✕</button>`).join(' ')}</p>` : ''}`;
@@ -1671,7 +1689,7 @@ function renderData() {
           <li>Repeat for your spend log tab.</li>
           <li>Drop both files here.</li>
         </ol>
-        <p class="note" style="margin-top:12px">Headers it looks for: Date, Ad / Spark link, Hook Text, Hook Style, Status, Spend, Conversions, Revenue, Parent Creative ID, What Changed, Format, Offer, Campaign Style, Notes. For the spend log: Date, Card, What, Amount. For ban history: Date, Ad account, BC, Reason, What was running, Lesson. For a list of names: Ad account and/or BC. Your Daily Journal tab imports too. If your sheet splits details (Creatives tab) from results (Runs tab), import both — they’re matched by Creative ID.</p>
+        <p class="note" style="margin-top:12px">Headers it looks for: Date, Ad / Spark link, Hook Text, Hook Style, Status, Spend, Conversions, Revenue, Clicks (or EPC), Parent Creative ID, What Changed, Format, Offer, Campaign Style, Notes. For the spend log: Date, Card, What, Amount. For ban history: Date, Ad account, BC, Reason, What was running, Lesson. For a list of names: Ad account and/or BC. Your Daily Journal tab imports too. If your sheet splits details (Creatives tab) from results (Runs tab), import both — they’re matched by Creative ID.</p>
       </section>
     </div>
 
