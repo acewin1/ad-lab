@@ -1,0 +1,1415 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ad Lab — creative test tracker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,300..800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#F3F6F8; --panel:#FFFFFF; --ink:#16222F; --ink-2:#596776; --ink-3:#8A96A3;
+  --line:#D8DFE5; --line-2:#E8EDF1; --grid:rgba(36,87,197,.055);
+  --blue:#2457C5; --blue-soft:#E3EBFA;
+  --win:#1E8656; --win-soft:#E1F2E9; --watch:#A86E06; --watch-soft:#FBF0D9;
+  --kill:#BF3329; --kill-soft:#F9E3E1; --early:#6B7785; --early-soft:#ECEFF2;
+  --radius:10px; --radius-sm:6px;
+  --font:'Archivo', system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --paper:#0E151D; --panel:#151F2A; --ink:#E4EAF0; --ink-2:#9AA7B4; --ink-3:#6D7B89;
+    --line:#26333F; --line-2:#1D2833; --grid:rgba(110,150,240,.06);
+    --blue:#7DA2F2; --blue-soft:#1B2A45;
+    --win:#4CC28A; --win-soft:#143327; --watch:#E2A93C; --watch-soft:#3A2C10;
+    --kill:#F07A70; --kill-soft:#3D1A18; --early:#9AA7B4; --early-soft:#1E2934;
+  }
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{
+  font-family:var(--font); font-stretch:100%; color:var(--ink); background:var(--paper);
+  background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+  background-size:24px 24px; font-size:15px; line-height:1.45; -webkit-font-smoothing:antialiased;
+}
+button,input,select{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.app{display:grid;grid-template-columns:212px 1fr;min-height:100vh}
+.side{position:sticky;top:0;height:100vh;padding:24px 16px;border-right:1px solid var(--line);background:var(--paper);display:flex;flex-direction:column;gap:24px}
+.brand{font-stretch:62%;font-weight:800;font-size:30px;letter-spacing:-.01em;line-height:1;padding:0 8px}
+.brand small{display:block;font-stretch:100%;font-weight:400;font-size:12px;color:var(--ink-2);letter-spacing:0;margin-top:6px}
+.nav{display:flex;flex-direction:column;gap:2px}
+.nav button{all:unset;cursor:pointer;padding:8px 10px;border-radius:var(--radius-sm);color:var(--ink-2);display:flex;justify-content:space-between;align-items:center}
+.nav button:hover{color:var(--ink);background:var(--line-2)}
+.nav button[aria-current=page]{color:var(--ink);background:var(--panel);box-shadow:inset 3px 0 0 var(--blue);font-weight:600}
+.nav .count{font-size:12px;color:var(--ink-3);font-variant-numeric:tabular-nums}
+.side-foot{margin-top:auto;font-size:12px;color:var(--ink-3);padding:0 8px}
+main{padding:32px clamp(16px,4vw,48px) 64px;min-width:0;max-width:1280px}
+h1{font-stretch:75%;font-weight:700;font-size:34px;line-height:1.05;margin:0 0 6px;letter-spacing:-.01em}
+.lede{color:var(--ink-2);margin:0 0 28px;max-width:68ch}
+h2{font-size:17px;font-weight:650;margin:0 0 4px}
+.note{font-size:13px;color:var(--ink-2);margin:0 0 14px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:20px}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,380px),1fr));gap:16px}
+.stack{display:flex;flex-direction:column;gap:16px}
+
+/* The ledger: the money trail, left to right */
+.ledger{display:grid;grid-template-columns:repeat(5,1fr);background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;margin-bottom:16px}
+.ledger > div{padding:18px 20px 20px;position:relative;min-width:0}
+.ledger > div + div{border-left:1px solid var(--line)}
+.ledger > div + div::before{content:"";position:absolute;left:-7px;top:50%;width:12px;height:12px;background:var(--panel);border-top:1px solid var(--line);border-right:1px solid var(--line);transform:translateY(-50%) rotate(45deg)}
+.ledger .lab{font-size:13px;color:var(--ink-2)}
+.ledger .num{font-stretch:62%;font-weight:700;font-size:clamp(30px,3.6vw,46px);line-height:1;margin-top:8px;font-variant-numeric:tabular-nums;letter-spacing:-.01em;white-space:nowrap}
+.ledger .sub{font-size:12px;color:var(--ink-3);margin-top:8px}
+.neg{color:var(--kill)} .pos{color:var(--win)}
+@media (max-width:900px){
+  .ledger{grid-template-columns:1fr 1fr}
+  .ledger > div + div{border-left:0}
+  .ledger > div{border-top:1px solid var(--line)}
+  .ledger > div:nth-child(-n+2){border-top:0}
+  .ledger > div:nth-child(even){border-left:1px solid var(--line)}
+  .ledger > div + div::before{display:none}
+  .ledger > div:last-child{grid-column:1/-1}
+}
+
+/* status strip */
+.strip{display:flex;height:14px;border-radius:999px;overflow:hidden;background:var(--line-2);margin:12px 0}
+.strip span{display:block;height:100%}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:13px;color:var(--ink-2)}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+
+.insights{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+.insights li{display:grid;grid-template-columns:10px 1fr;gap:12px;padding:12px 0;border-top:1px solid var(--line-2)}
+.insights li:first-child{border-top:0;padding-top:4px}
+.insights li::before{content:"";width:8px;height:8px;border-radius:50%;margin-top:7px;background:var(--ink-3)}
+.insights li.bad::before{background:var(--kill)} .insights li.good::before{background:var(--win)} .insights li.warn::before{background:var(--watch)}
+.insights b{font-weight:650}
+
+/* tables */
+.tbl-wrap{overflow:auto;max-height:70vh;border:1px solid var(--line);border-radius:var(--radius);background:var(--panel)}
+table{border-collapse:collapse;width:100%;font-size:14px;font-variant-numeric:tabular-nums}
+th{position:sticky;top:0;z-index:1;background:var(--panel);text-align:left;font-weight:600;color:var(--ink-2);font-size:13px;padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap}
+th button{all:unset;cursor:pointer}
+th[aria-sort=ascending] button::after{content:" ▲";font-size:10px}
+th[aria-sort=descending] button::after{content:" ▼";font-size:10px}
+td{padding:10px 12px;border-bottom:1px solid var(--line-2);vertical-align:top}
+tr:last-child td{border-bottom:0}
+.r{text-align:right} th.r{text-align:right}
+.muted{color:var(--ink-3)}
+.hook{min-width:16rem;max-width:30rem}
+tbody tr.row{cursor:pointer}
+tbody tr.row:hover td{background:var(--line-2)}
+tr.detail td{background:var(--paper);padding:14px 16px}
+.kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(14rem,1fr));gap:10px 24px;font-size:13px}
+.kv div span{display:block;color:var(--ink-3);font-size:12px}
+.kv a{color:var(--blue);word-break:break-all}
+.small{color:var(--ink-3);font-size:12px}
+.bar-cell{display:flex;align-items:center;gap:8px;justify-content:flex-end}
+.bar-cell i{display:block;height:8px;border-radius:4px;background:var(--blue);opacity:.75}
+
+.tag{display:inline-block;font-size:12px;font-weight:600;padding:2px 8px;border-radius:999px;white-space:nowrap}
+.t-win{background:var(--win-soft);color:var(--win)} .t-watch{background:var(--watch-soft);color:var(--watch)}
+.t-kill{background:var(--kill-soft);color:var(--kill)} .t-early{background:var(--early-soft);color:var(--early)}
+
+.toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
+.toolbar input[type=search]{flex:1 1 220px}
+input[type=search],input[type=text],input[type=url],input[type=number],select{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius-sm);padding:8px 10px;min-width:0}
+.btn{cursor:pointer;border:1px solid var(--line);background:var(--panel);border-radius:var(--radius-sm);padding:8px 14px;font-weight:550}
+.btn:hover{border-color:var(--ink-3)}
+.btn.primary{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.btn.danger{color:var(--kill)}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:var(--radius-sm);overflow:hidden;background:var(--panel)}
+.seg button{all:unset;cursor:pointer;padding:7px 12px;font-size:14px;color:var(--ink-2)}
+.seg button + button{border-left:1px solid var(--line)}
+.seg button[aria-pressed=true]{background:var(--ink);color:var(--paper)}
+
+.drop{border:2px dashed var(--line);border-radius:var(--radius);padding:36px 20px;text-align:center;background:var(--panel);cursor:pointer;transition:border-color .15s,background .15s}
+.drop:hover,.drop.over{border-color:var(--blue);background:var(--blue-soft)}
+.drop strong{display:block;font-stretch:75%;font-size:24px;font-weight:700;margin-bottom:4px}
+.drop-slim{padding:16px 20px;text-align:left;font-size:14px;color:var(--ink-2)}
+.paste summary{cursor:pointer;font-weight:600}
+.paste[open] summary{margin-bottom:4px}
+.drop-slim strong{font-size:19px;color:var(--ink)}
+.steps{margin:0;padding-left:20px;color:var(--ink-2);font-size:14px}
+.steps li{margin:4px 0}
+.log{list-style:none;margin:12px 0 0;padding:0;font-size:13px}
+.log li{padding:8px 0;border-top:1px solid var(--line-2);display:flex;justify-content:space-between;gap:12px}
+.log li .ok{color:var(--win)} .log li .err{color:var(--kill)}
+.rules{display:grid;grid-template-columns:repeat(auto-fit,minmax(12rem,1fr));gap:12px}
+.rules label{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--ink-2)}
+.empty{text-align:center;padding:48px 20px;color:var(--ink-2)}
+textarea{font:inherit;color:inherit;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius-sm);padding:8px 10px;resize:vertical;width:100%}
+.field{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--ink-2)}
+.field input{width:100%}
+.h3{font-size:14px;font-weight:600;margin:14px 0 8px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{font-size:13px;padding:4px 10px;border-radius:999px;background:var(--kill-soft);color:var(--ink)}
+.chip b{color:var(--kill);font-weight:700;margin-left:4px;font-variant-numeric:tabular-nums}
+.chip i{font-style:normal;color:var(--ink-3)}
+.kchips{display:flex;flex-wrap:wrap;gap:8px}
+.kchip{all:unset;cursor:pointer;font-size:14px;padding:6px 12px;border-radius:999px;font-weight:550}
+.kchip b{font-weight:700;margin-left:4px;font-variant-numeric:tabular-nums}
+.kchip.up{background:var(--win-soft);color:var(--win)} .kchip.down{background:var(--kill-soft);color:var(--kill)}
+.kchip:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.kw{font-weight:600}
+.lift{display:flex;align-items:center;gap:8px;min-width:150px}
+.lift-track{position:relative;flex:1;height:10px;background:var(--line-2);border-radius:5px}
+.lift-track::after{content:"";position:absolute;left:50%;top:-3px;bottom:-3px;width:1px;background:var(--ink-3)}
+.lift-track i{position:absolute;top:0;bottom:0;border-radius:5px}
+.lift-track i.up{left:50%;background:var(--win)} .lift-track i.down{right:50%;background:var(--kill)}
+.lift-num{width:3.6rem;text-align:right;font-variant-numeric:tabular-nums}
+mark{background:color-mix(in srgb,var(--blue) 22%,transparent);color:inherit;border-radius:3px;padding:0 2px}
+table.mini{font-size:13px;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius-sm)}
+table.mini td{padding:6px 10px}
+.link{all:unset;cursor:pointer;color:var(--blue);margin-right:8px}
+.link:focus-visible{outline:2px solid var(--blue)}
+.sum-head{display:flex;flex-wrap:wrap;gap:16px;justify-content:space-between;align-items:flex-end}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,10.5rem),1fr));gap:12px;margin-bottom:16px}
+.kpi{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px}
+.kpi .lab{font-size:13px;color:var(--ink-2)}
+.kpi .num{font-stretch:62%;font-weight:700;font-size:38px;line-height:1;margin:8px 0 6px;font-variant-numeric:tabular-nums}
+.kpi .sub{font-size:12px;color:var(--ink-3);margin-top:4px}
+.dl{font-size:13px;font-weight:600;color:var(--ink-3);font-variant-numeric:tabular-nums}
+.dl.pos{color:var(--win)} .dl.neg{color:var(--kill)}
+.best{margin:0;padding-left:22px}
+.best li{padding:8px 0;border-top:1px solid var(--line-2)} .best li:first-child{border-top:0;padding-top:0}
+.best-hook{font-weight:550}
+.choices{list-style:none;margin:0;padding:0}
+.choices li{padding:9px 0;border-top:1px solid var(--line-2)} .choices li:first-child{border-top:0;padding-top:0}
+svg.trend{display:block;overflow:visible}
+svg.trend .axis{stroke:var(--line)}
+svg.trend .b{fill:var(--blue)} svg.trend .b0{fill:var(--line)}
+svg.trend text{font-family:var(--font);fill:var(--ink-2);text-anchor:middle;font-size:12px;font-variant-numeric:tabular-nums}
+svg.trend .v{fill:var(--ink);font-weight:600}
+@media print{
+  body{background:#fff}
+  .side,.no-print,.toast,.drag-veil{display:none!important}
+  .app{display:block}
+  main{padding:0;max-width:none}
+  .panel,.kpi{break-inside:avoid}
+}
+.bars{display:flex;flex-direction:column;gap:10px}
+.bars .b{display:grid;grid-template-columns:minmax(6rem,11rem) 1fr 5.5rem;gap:10px;align-items:center;font-size:14px}
+.bars .b .t{height:12px;background:var(--line-2);border-radius:6px;overflow:hidden}
+.bars .b .t i{display:block;height:100%;background:var(--blue);border-radius:6px}
+.bars .b .v{text-align:right;font-variant-numeric:tabular-nums}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ink);color:var(--paper);padding:10px 16px;border-radius:var(--radius-sm);font-size:14px;box-shadow:0 6px 24px rgba(0,0,0,.18);z-index:20;max-width:90vw}
+.drag-veil{position:fixed;inset:0;background:color-mix(in srgb,var(--blue) 14%,transparent);border:3px dashed var(--blue);z-index:30;display:none;align-items:center;justify-content:center;font-stretch:75%;font-size:32px;font-weight:700;color:var(--blue)}
+.drag-veil.on{display:flex}
+
+@media (max-width:760px){
+  .app{grid-template-columns:1fr}
+  .side{position:sticky;top:0;z-index:5;height:auto;flex-direction:row;align-items:center;padding:10px 12px;border-right:0;border-bottom:1px solid var(--line);gap:12px;overflow-x:auto}
+  .brand{font-size:22px;padding:0}
+  .brand small,.side-foot,.nav .count{display:none}
+  .nav{flex-direction:row}
+  .nav button[aria-current=page]{box-shadow:inset 0 -2px 0 var(--blue)}
+  main{padding-top:20px}
+  h1{font-size:28px}
+  .hide-sm{display:none}
+}
+@media (prefers-reduced-motion: reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="side">
+    <div class="brand">Ad Lab<small>Creative test tracker</small></div>
+    <nav class="nav" aria-label="Sections">
+      <button data-view="summary">Summary</button>
+      <button data-view="overview">Overview</button>
+      <button data-view="ads">Ads <span class="count" id="c-ads"></span></button>
+      <button data-view="keywords">Keywords</button>
+      <button data-view="patterns">Patterns</button>
+      <button data-view="bans">Ban log <span class="count" id="c-bans"></span></button>
+      <button data-view="spend">Spend <span class="count" id="c-spend"></span></button>
+      <button data-view="data">Import &amp; data</button>
+    </nav>
+    <div class="side-foot" id="saved-note">Everything is saved in this browser.</div>
+  </aside>
+  <main id="view" tabindex="-1"></main>
+</div>
+<div class="drag-veil" id="veil">Drop CSV files to import</div>
+<input type="file" id="file" accept=".csv,text/csv" multiple hidden>
+
+<script>
+/* ============ Storage ============ */
+const STORE = 'adlab.v1';
+const DEFAULT_RULES = { minSpend: 10, winRoas: 1.3, watchRoas: 0.8, minGroup: 10 };
+function blank() { return { ads: [], spend: [], bans: [], names: { accounts: [], bcs: [] }, ignored: [], imports: [], syncs: [], rules: { ...DEFAULT_RULES } }; }
+function load() {
+  try {
+    const s = JSON.parse(localStorage.getItem(STORE));
+    if (s) return { ...blank(), ...s, rules: { ...DEFAULT_RULES, ...(s.rules || {}) } };
+  } catch (e) {}
+  return blank();
+}
+let state = load();
+const canSave = (() => { try { localStorage.setItem(STORE + '.t', '1'); localStorage.removeItem(STORE + '.t'); return true; } catch (e) { return false; } })();
+let warnedSave = false;
+function save() {
+  if (!canSave) {
+    if (!warnedSave) { warnedSave = true; toast('This preview can’t save. Download index.html and open it in your browser to keep your data.'); }
+    return;
+  }
+  try { localStorage.setItem(STORE, JSON.stringify(state)); }
+  catch (e) { toast('Couldn’t save — your browser storage is full. Download a backup from Import & data.'); }
+}
+
+/* ============ Helpers ============ */
+const $ = (s, el = document) => el.querySelector(s);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const usd = (n) => n == null || Number.isNaN(n) ? '—' : (n < 0 ? '−' : '') + '$' + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const usd0 = (n) => n == null ? '—' : (n < 0 ? '−' : '') + '$' + Math.abs(n).toLocaleString('en-US', { maximumFractionDigits: Math.abs(n) >= 1000 ? 0 : 2, minimumFractionDigits: Math.abs(n) >= 1000 ? 0 : 2 });
+const int = (n) => n == null ? '—' : Math.round(n).toLocaleString('en-US');
+const pct = (n) => n == null || !isFinite(n) ? '—' : Math.round(n * 100) + '%';
+const roasFmt = (n) => n == null || !isFinite(n) ? '—' : n.toFixed(2) + 'x';
+const plural = (n, a, b) => `${int(n)} ${n === 1 ? a : (b || a + 's')}`;
+function toast(msg) {
+  const t = document.createElement('div'); t.className = 'toast'; t.setAttribute('role', 'status'); t.textContent = msg;
+  document.body.append(t); setTimeout(() => t.remove(), 4200);
+}
+function money(s) {
+  const t = String(s ?? '').trim();
+  if (!t || !/[0-9]/.test(t)) return null;
+  const neg = /^\(.*\)$/.test(t) || /^-/.test(t) || /^−/.test(t);
+  const n = Number(t.replace(/[^0-9.]/g, ''));
+  return Number.isNaN(n) ? null : (neg ? -n : n);
+}
+function count(s) {
+  const t = String(s ?? '').trim();
+  if (!t) return null;
+  const n = Number(t.replace(/[^0-9.]/g, ''));
+  return Number.isNaN(n) ? null : n;
+}
+const thisYear = new Date().getFullYear(), thisMonth = new Date().getMonth() + 1;
+function dateKey(s) {
+  const t = String(s || '').trim();
+  let m;
+  if ((m = t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/))) return +m[1] * 10000 + +m[2] * 100 + +m[3];
+  if ((m = t.match(/^(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?/))) {
+    let y = m[3] ? +m[3] : (+m[1] > thisMonth + 1 ? thisYear - 1 : thisYear);
+    if (y < 100) y += 2000;
+    return y * 10000 + +m[1] * 100 + +m[2];
+  }
+  return 0;
+}
+function hash(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(36); }
+const shortId = (u) => { const m = String(u || '').match(/(\d{10,})/); return m ? '…' + m[1].slice(-6) : String(u || ''); };
+
+/* ============ CSV ============ */
+function parseCSV(text) {
+  text = String(text).replace(/^﻿/, '');
+  const delim = (text.split('\n')[0].match(/\t/g) || []).length > (text.split('\n')[0].match(/,/g) || []).length ? '\t' : ',';
+  const rows = []; let row = [], f = '', q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) {
+      if (c === '"') { if (text[i + 1] === '"') { f += '"'; i++; } else q = false; }
+      else f += c;
+    } else if (c === '"') q = true;
+    else if (c === delim) { row.push(f); f = ''; }
+    else if (c === '\n' || c === '\r') {
+      if (c === '\r' && text[i + 1] === '\n') i++;
+      row.push(f); rows.push(row); row = []; f = '';
+    } else f += c;
+  }
+  if (f !== '' || row.length) { row.push(f); rows.push(row); }
+  return rows;
+}
+function toCSV(rows) {
+  return rows.map((r) => r.map((v) => {
+    const s = String(v ?? '');
+    return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }).join(',')).join('\n');
+}
+
+/* ============ Column matching ============ */
+const norm = (x) => String(x ?? '').split(/\r?\n/)[0].trim().toLowerCase();
+const AD_COLS = {
+  date: /^(date|launch date|day)\b/,
+  creative_id: /^creative id/,
+  ad: /^(ad \/ spark|ad\/spark|ad link|ad url|spark|creative link|link)/,
+  offer: /^offer$/,
+  offer_type: /^offer type/,
+  parent: /^parent/,
+  changed: /^what changed/,
+  format: /^format/,
+  hook: /^hook( text)?$/,
+  hook_style: /^hook style/,
+  visual: /^visual/,
+  sound: /^sound/,
+  caption: /^caption/,
+  campaign: /^(campaign|optimization|objective)/,
+  account: /^(account|bc\b)/,
+  launch_hour: /^launch hour/,
+  status: /^status/,
+  spend: /^spend/,
+  conversions: /(conversion|postback|^conv)/,
+  revenue: /^revenue/,
+  notes: /^notes/,
+};
+const SPEND_COLS = {
+  date: /^date/, card: /^card/, what: /^(what|category|item|for)\b/, amount: /(amount|charged|cost|price)/, notes: /^notes/,
+};
+const BAN_COLS = {
+  date: /^(date banned|banned on|ban date|date)\b/,
+  kind: /^(type|what got hit|ban type)/,
+  account: /^(?!.*\bid\b)(advertiser|ad account|account)/,
+  account_id: /^(advertiser|ad account|account)( account)? id/,
+  bc: /^(bc|business cent)/,
+  reason: /^(reason|violation|policy)/,
+  running: /^(what was running|running|campaign|offer|what i ran)/,
+  lesson: /^(lesson|what i.?ll do|change|next time|fix)/,
+  status: /^status/,
+  notes: /^notes/,
+};
+const NAME_COLS = {
+  account: /^(?!.*\bid\b)(advertiser|ad account|account)/,
+  account_id: /^(advertiser|ad account|account)( account)? id/,
+  bc: /^(bc|business cent)/,
+};
+function findCols(header, map) {
+  const h = header.map(norm), out = {};
+  for (const [k, re] of Object.entries(map)) out[k] = h.findIndex((x) => re.test(x));
+  return out;
+}
+function detect(header) {
+  const h = header.map(norm), has = (re) => h.some((x) => re.test(x));
+  const named = has(/^(advertiser|ad account|account|bc\b|business cent)/);
+  if (named && (has(/^(reason|violation|lesson)/) || has(/^(date banned|banned on|ban date)/))) return 'bans';
+  if (has(/(amount|charged)/) && !has(/^status/) && !has(/^hook/)) return 'spend';
+  if (has(/^status/) && (has(/^spend/) || has(/^hook/))) return 'ads';
+  if (has(/^hook/) && has(/^spend/)) return 'ads';
+  if (named && !has(/^(spend|hook|amount)/)) return 'names';
+  return null;
+}
+function readTable(rows) {
+  for (let i = 0; i < Math.min(rows.length, 6); i++) {
+    const type = detect(rows[i]);
+    if (type) return { type, header: rows[i], body: rows.slice(i + 1) };
+  }
+  return null;
+}
+const cell = (r, i) => (i >= 0 ? String(r[i] ?? '').trim() : '');
+function rowsToAds(header, body, source) {
+  const ix = findCols(header, AD_COLS), out = [];
+  body.forEach((r) => {
+    if (!r.some((x) => String(x ?? '').trim())) return;
+    const a = {};
+    for (const k of Object.keys(AD_COLS)) a[k] = cell(r, ix[k]);
+    if (!a.date && !a.ad && !a.hook) return;
+    a.spend = money(a.spend); a.conversions = count(a.conversions); a.revenue = money(a.revenue);
+    a.source = source;
+    a.id = hash([a.date, a.ad || a.creative_id, a.hook, a.campaign].join('|'));
+    out.push(a);
+  });
+  return out;
+}
+function rowsToSpend(header, body, source) {
+  const ix = findCols(header, SPEND_COLS), out = [], seen = {};
+  body.forEach((r) => {
+    if (!r.some((x) => String(x ?? '').trim())) return;
+    const s = { date: cell(r, ix.date), card: cell(r, ix.card), what: cell(r, ix.what), amount: money(cell(r, ix.amount)), notes: cell(r, ix.notes), source };
+    if (s.amount == null && !s.what) return;
+    const base = [s.date, s.card, s.what, s.amount].join('|');
+    seen[base] = (seen[base] || 0) + 1;
+    s.id = hash(base + '#' + seen[base]);
+    out.push(s);
+  });
+  return out;
+}
+
+function rowsToBans(header, body, source) {
+  const ix = findCols(header, BAN_COLS), out = [];
+  body.forEach((r) => {
+    if (!r.some((x) => String(x ?? '').trim())) return;
+    const b = {};
+    for (const k of Object.keys(BAN_COLS)) b[k] = cell(r, ix[k]);
+    b.account = b.account || b.account_id;
+    // a row that only says an account is fine isn't a ban — skip it
+    const banned = b.reason || b.lesson || /ban|suspend|disapprov|reject|restrict|disabled|dead/i.test(b.status);
+    if (!banned) return;
+    if (!b.kind) b.kind = /disapprov|reject/i.test(b.status) ? 'Ad disapproved' : (b.bc && !b.account) || /bc|business/i.test(b.status) ? 'Business Center banned' : b.account ? 'Ad account suspended' : 'Other';
+    const iso = dateKey(b.date) ? String(dateKey(b.date)).replace(/^(\d{4})(\d{2})(\d{2})$/, '$1-$2-$3') : '';
+    out.push({
+      id: hash(['ban', iso, b.account, b.bc, b.reason].join('|')),
+      date: iso, kind: b.kind, account: b.account, bc: b.bc, reason: b.reason,
+      running: [b.running, b.notes].filter(Boolean).join('\n'), lesson: b.lesson, source,
+    });
+  });
+  return out;
+}
+function rowsToNames(header, body) {
+  const ix = findCols(header, NAME_COLS), accounts = new Set(), bcs = new Set();
+  body.forEach((r) => {
+    const a = cell(r, ix.account) || cell(r, ix.account_id), b = cell(r, ix.bc);
+    if (a) accounts.add(a); if (b) bcs.add(b);
+  });
+  return { accounts: [...accounts], bcs: [...bcs] };
+}
+function knownNames() {
+  const acc = new Set(state.names.accounts), bcs = new Set(state.names.bcs);
+  state.bans.forEach((b) => { if (b.account || b.acct) acc.add(b.account || b.acct); if (b.bc) bcs.add(b.bc); });
+  state.ads.forEach((a) => { if (a.account) acc.add(a.account); });
+  const sort = (s) => [...s].filter(Boolean).sort((x, y) => x.localeCompare(y));
+  return { accounts: sort(acc), bcs: sort(bcs) };
+}
+
+/* ============ Import ============ */
+function merge(kind, incoming, mode) {
+  if (mode === 'replace') { state[kind] = incoming; return { added: incoming.length, updated: 0 }; }
+  const map = new Map(state[kind].map((x) => [x.id, x]));
+  let added = 0, updated = 0;
+  incoming.forEach((x) => { if (map.has(x.id)) updated++; else added++; map.set(x.id, x); });
+  state[kind] = [...map.values()];
+  return { added, updated };
+}
+function importText(text, name, mode) {
+  const rows = parseCSV(text);
+  const t = readTable(rows);
+  if (!t) return { name, ok: false, msg: 'Couldn’t tell what this is. Row 1 needs headers like Status, Spend and Hook Text (ads), Amount and What (spend), Ad account and Reason (ban history) or Ad account / BC (names).' };
+  if (t.type === 'names') {
+    const n = rowsToNames(t.header, t.body);
+    if (!n.accounts.length && !n.bcs.length) return { name, ok: false, msg: 'Found the name columns but they’re empty.' };
+    const before = state.names.accounts.length + state.names.bcs.length;
+    state.names.accounts = [...new Set([...(importMode === 'replace' ? [] : state.names.accounts), ...n.accounts])];
+    state.names.bcs = [...new Set([...(importMode === 'replace' ? [] : state.names.bcs), ...n.bcs])];
+    state.imports.unshift({ name, type: 'names', rows: n.accounts.length + n.bcs.length, at: new Date().toISOString() });
+    const added = state.names.accounts.length + state.names.bcs.length - (importMode === 'replace' ? 0 : before);
+    // accounts TikTok shows as suspended or disabled go into the ban log, once each, for you to add the reason and lesson
+    const logged = new Set(state.bans.map((b) => (b.account || b.acct || '') + '|' + (b.bc || '')));
+    const newBans = rowsToBans(t.header, t.body, name).filter((b) => !logged.has((b.account || '') + '|' + (b.bc || '')));
+    newBans.forEach((b) => { b.date = b.date || new Date().toISOString().slice(0, 10); b.auto = true; state.bans.push(b); });
+    return { name, ok: true, kind: 'names', msg: `${plural(n.accounts.length, 'ad account')} and ${plural(n.bcs.length, 'BC')} added to your pick-list${importMode === 'replace' ? '' : ` (${int(added)} new)`}${newBans.length ? `. ${plural(newBans.length, 'suspended account')} added to your ban log — add the reason to each.` : ''}` };
+  }
+  if (t.type === 'bans') {
+    const items = rowsToBans(t.header, t.body, name);
+    if (!items.length) return { name, ok: false, msg: 'No bans found. Rows need a Reason, a Lesson, or a Status like Banned or Suspended.' };
+    // a detailed entry replaces the blank one an account-list paste created for the same account
+    const incoming = new Set(items.filter((b) => b.reason || b.lesson).map((b) => (b.account || '') + '|' + (b.bc || '')));
+    state.bans = state.bans.filter((b) => !b.auto || b.reason || b.lesson || !incoming.has((b.account || b.acct || '') + '|' + (b.bc || '')));
+    const r = merge('bans', items, importMode);
+    state.imports.unshift({ name, type: 'bans', rows: items.length, at: new Date().toISOString() });
+    return { name, ok: true, kind: 'bans', msg: importMode === 'replace' ? `Ban log replaced with ${plural(items.length, 'entry', 'entries')}` : `${plural(r.added, 'ban', 'bans')} added to your ban log, ${int(r.updated)} updated` };
+  }
+  const items = t.type === 'ads' ? rowsToAds(t.header, t.body, name) : rowsToSpend(t.header, t.body, name);
+  if (!items.length) return { name, ok: false, msg: 'Found the headers but no rows under them.' };
+  const kind = t.type === 'ads' ? 'ads' : 'spend';
+  const r = merge(kind, items, mode);
+  state.imports.unshift({ name, type: kind, rows: items.length, at: new Date().toISOString() });
+  state.imports = state.imports.slice(0, 30);
+  const label = kind === 'ads' ? 'ad' : 'charge';
+  return { name, ok: true, kind, msg: mode === 'replace' ? `Replaced with ${plural(items.length, label)}` : `${plural(r.added, 'new ' + label, 'new ' + label + 's')}, ${int(r.updated)} updated` };
+}
+let importMode = 'merge';
+let lastLog = [];
+async function importFiles(files) {
+  const results = [];
+  for (const f of files) {
+    if (!/\.(csv|tsv|txt)$/i.test(f.name) && f.type && !/csv|text/.test(f.type)) { results.push({ name: f.name, ok: false, msg: 'Not a CSV. In Google Sheets use File › Download › Comma-separated values.' }); continue; }
+    try { results.push(importText(await f.text(), f.name, importMode)); }
+    catch (e) { results.push({ name: f.name, ok: false, msg: 'Couldn’t read this file.' }); }
+  }
+  save();
+  lastLog = results;
+  const ok = results.filter((r) => r.ok).length;
+  toast(ok ? `Imported ${plural(ok, 'file')}.` : 'Nothing imported — see Import & data for why.');
+  render();
+}
+async function syncAll() {
+  if (!state.syncs.length) return;
+  const results = [];
+  for (const s of state.syncs) {
+    try {
+      const res = await fetch(s.url, { cache: 'no-store' });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const text = await res.text();
+      if (/^\s*</.test(text)) throw new Error('html');
+      const r = importText(text, s.label || 'Linked sheet', 'merge');
+      s.last = new Date().toISOString(); s.ok = r.ok; s.msg = r.msg;
+      results.push(r);
+    } catch (e) {
+      s.last = new Date().toISOString(); s.ok = false;
+      s.msg = 'Couldn’t fetch. Make sure it’s a “Publish to web” CSV link, not the normal sheet link.';
+      results.push({ name: s.label || s.url, ok: false, msg: s.msg });
+    }
+  }
+  save(); lastLog = results; render();
+  toast('Synced linked sheets.');
+}
+
+/* ============ Metrics ============ */
+const isBanned = (a) => /banned|suspend/i.test(a.status);
+const isDisapproved = (a) => /disapprov|rejected/i.test(a.status);
+function verdict(a) {
+  const R = state.rules;
+  if (isBanned(a)) return { k: 'kill', t: 'Banned' };
+  if (isDisapproved(a)) return { k: 'kill', t: 'Disapproved' };
+  if ((a.spend || 0) < R.minSpend) return { k: 'early', t: 'Too early' };
+  const roas = a.spend ? (a.revenue || 0) / a.spend : 0;
+  if (roas >= R.winRoas) return { k: 'win', t: 'Winner' };
+  if (roas >= R.watchRoas) return { k: 'watch', t: 'Watch' };
+  return { k: 'kill', t: 'Kill' };
+}
+function agg(list) {
+  const spend = list.reduce((s, a) => s + (a.spend || 0), 0);
+  const conv = list.reduce((s, a) => s + (a.conversions || 0), 0);
+  const rev = list.reduce((s, a) => s + (a.revenue || 0), 0);
+  const banned = list.filter(isBanned).length;
+  return { n: list.length, spend, conv, rev, banned, disapproved: list.filter(isDisapproved).length,
+    cpa: conv ? spend / conv : null, roas: spend ? rev / spend : null, profit: rev - spend, banRate: list.length ? banned / list.length : null };
+}
+function groupBy(list, keyFn) {
+  const m = new Map();
+  list.forEach((x) => { [].concat(keyFn(x)).forEach((k) => { if (!m.has(k)) m.set(k, []); m.get(k).push(x); }); });
+  return m;
+}
+
+/* ============ Views ============ */
+let view = (location.hash.slice(1) || 'summary');
+const VIEWS = { summary: renderSummary, overview: renderOverview, ads: renderAds, keywords: renderKeywords, patterns: renderPatterns, bans: renderBans, spend: renderSpend, data: renderData };
+if (!VIEWS[view]) view = 'summary';
+function go(v) {
+  view = v;
+  try { history.replaceState(null, '', '#' + v); } catch (e) { /* previews and sandboxed frames block this; the tab still switches */ }
+  render(); $('#view').focus({ preventScroll: true }); window.scrollTo(0, 0); }
+document.querySelectorAll('.nav button').forEach((b) => b.addEventListener('click', () => go(b.dataset.view)));
+function render() {
+  document.querySelectorAll('.nav button').forEach((b) => { if (b.dataset.view === view) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
+  $('#c-ads').textContent = state.ads.length ? int(state.ads.length) : '';
+  $('#c-spend').textContent = state.spend.length ? int(state.spend.length) : '';
+  $('#c-bans').textContent = state.bans.length ? int(state.bans.length) : '';
+  VIEWS[view]();
+}
+
+function emptyState(title, body) {
+  return `<div class="panel empty"><h2>${esc(title)}</h2><p class="note">${esc(body)}</p>
+    <div class="drop" data-pick tabindex="0" role="button"><strong>Drop your CSVs here</strong>or click to choose files</div></div>`;
+}
+
+function renderOverview() {
+  const el = $('#view');
+  if (!state.ads.length && !state.spend.length) {
+    el.innerHTML = `<h1>Your tests, at a glance</h1>
+      <p class="lede">Export your creative log and spend log tabs from Google Sheets as CSV and drop them in. Columns are matched by their header names, so any sheet with the same kind of layout works.</p>
+      ${emptyState('No data yet', 'In Google Sheets: open the tab, then File › Download › Comma-separated values (.csv). Do it for each tab and drop all the files here at once.')}`;
+    bindPick(el); return;
+  }
+  const A = agg(state.ads);
+  const cash = state.spend.reduce((s, x) => s + (x.amount || 0), 0);
+  const hasSpendLog = state.spend.length > 0;
+  const profit = A.rev - (hasSpendLog ? cash : A.spend);
+
+  const statusM = groupBy(state.ads, (a) => a.status || 'No status');
+  const statusColor = (s) => /banned|suspend/i.test(s) ? 'var(--kill)' : /disapprov|reject/i.test(s) ? 'color-mix(in srgb,var(--kill) 55%,var(--watch))' : /approved|live|active/i.test(s) ? 'var(--win)' : /paused/i.test(s) ? 'var(--watch)' : /appeal/i.test(s) ? 'var(--blue)' : 'var(--ink-3)';
+  const statuses = [...statusM].sort((a, b) => b[1].length - a[1].length);
+
+  // what needs attention
+  const ins = [];
+  if (A.conv > 0 && A.rev === 0) ins.push(['bad', `<b>${int(A.conv)} conversions, $0 revenue logged.</b> Either the Revenue column isn’t being filled in or those conversions aren’t paying out. Check with your network — every ROAS and verdict depends on it.`]);
+  if (hasSpendLog && cash > 0 && A.spend / cash < 0.5) ins.push(['bad', `<b>Only ${pct(A.spend / cash)} of your cash reached ads.</b> ${usd(A.spend)} logged as ad spend out of ${usd(cash)} spent in total. See Spend for where the rest went.`]);
+  const lost = A.banned + A.disapproved;
+  if (lost) ins.push([lost / A.n > 0.3 ? 'bad' : 'warn', `<b>${int(lost)} of ${int(A.n)} ads ended banned or disapproved</b> (${pct(lost / A.n)}). Open Ads and filter by verdict to see what they have in common.`]);
+  const noStatus = state.ads.filter((a) => !a.status).length;
+  if (noStatus) ins.push(['warn', `<b>${plural(noStatus, 'ad has', 'ads have')} no status.</b> Fill them in so the counts above stay honest.`]);
+  const zero = state.ads.filter((a) => (a.spend || 0) > 0 && !a.conversions);
+  if (zero.length) ins.push(['warn', `<b>${plural(zero.length, 'ad')} spent ${usd(zero.reduce((s, a) => s + a.spend, 0))} with zero conversions.</b>`]);
+  const best = state.ads.filter((a) => (a.conversions || 0) >= 2 && a.spend > 0).sort((a, b) => a.spend / a.conversions - b.spend / b.conversions)[0];
+  if (best) ins.push(['good', `<b>Lowest cost per conversion: ${usd(best.spend / best.conversions)}</b> on “${esc(best.hook || shortId(best.ad))}” (${plural(best.conversions, 'conversion')}, ${best.date}).`]);
+  const K = keywordStats(state.ads, 'both', 'hook');
+  const topK = K.rows.filter((r) => r.n >= 3 && r.lift >= 1.15).sort((a, b) => b.lift - a.lift || b.word.length - a.word.length)[0];
+  if (topK) ins.push(['good', `<b>Strongest hook keyword: “${esc(topK.word)}”</b> — ads using it got ${topK.lift.toFixed(1)}× your average conversions per dollar across ${plural(topK.n, 'ad')}. See Keywords for the full list.`]);
+  const wins = state.ads.filter((a) => verdict(a).k === 'win').length;
+  if (wins) ins.push(['good', `<b>${plural(wins, 'winner')}</b> at ${roasFmt(state.rules.winRoas)} ROAS or better.`]);
+  if (!ins.length) ins.push(['', 'Nothing stands out yet. Keep logging spend, conversions and revenue for each ad.']);
+
+  const days = [...groupBy(state.ads, (a) => a.date || 'No date')].map(([d, l]) => ({ d, k: dateKey(d), ...agg(l) })).sort((a, b) => b.k - a.k).slice(0, 14);
+  const verdicts = groupBy(state.ads, (a) => verdict(a).t);
+  const vOrder = ['Winner', 'Watch', 'Too early', 'Kill', 'Disapproved', 'Banned'];
+
+  el.innerHTML = `
+    <h1>Your tests, at a glance</h1>
+    <p class="lede">${plural(A.n, 'ad')} across ${plural(groupBy(state.ads, (a) => a.date).size, 'launch day')}. Money flows left to right: what you spent, what reached ads, what converted, what came back.</p>
+    <section class="ledger" aria-label="Money trail">
+      <div><div class="lab">Cash out</div><div class="num">${hasSpendLog ? usd0(cash) : '—'}</div><div class="sub">${hasSpendLog ? 'every charge in your spend log' : 'import your spend log to see this'}</div></div>
+      <div><div class="lab">Ad spend</div><div class="num">${usd0(A.spend)}</div><div class="sub">${hasSpendLog && cash ? pct(A.spend / cash) + ' of cash out' : 'logged on your ads'}</div></div>
+      <div><div class="lab">Conversions</div><div class="num">${int(A.conv)}</div><div class="sub">true CPA ${A.cpa == null ? '—' : usd(A.cpa)}</div></div>
+      <div><div class="lab">Revenue</div><div class="num">${usd0(A.rev)}</div><div class="sub">ROAS ${roasFmt(A.roas)}</div></div>
+      <div><div class="lab">Profit</div><div class="num ${profit < 0 ? 'neg' : profit > 0 ? 'pos' : ''}">${usd0(profit)}</div><div class="sub">revenue minus ${hasSpendLog ? 'all cash out' : 'ad spend'}</div></div>
+    </section>
+    <div class="grid2">
+      <section class="panel">
+        <h2>What needs your attention</h2>
+        <p class="note">Worked out from everything you’ve imported.</p>
+        <ul class="insights">${ins.map(([c, t]) => `<li class="${c}"><div>${t}</div></li>`).join('')}</ul>
+      </section>
+      <div class="stack">
+        <section class="panel">
+          <h2>Where every ad ended up</h2>
+          <p class="note">By the Status you logged.</p>
+          <div class="strip" role="img" aria-label="${esc(statuses.map(([s, l]) => s + ': ' + l.length).join(', '))}">${statuses.map(([s, l]) => `<span style="width:${(100 * l.length / A.n).toFixed(2)}%;background:${statusColor(s)}" title="${esc(s)}: ${l.length}"></span>`).join('')}</div>
+          <div class="legend">${statuses.map(([s, l]) => `<span><i style="background:${statusColor(s)}"></i>${esc(s)} ${l.length}</span>`).join('')}</div>
+        </section>
+        <section class="panel">
+          <h2>Verdicts</h2>
+          <p class="note">Winner ≥ ${roasFmt(state.rules.winRoas)} ROAS, Watch ≥ ${roasFmt(state.rules.watchRoas)}, judged after ${usd(state.rules.minSpend)} spend. Change these in Import &amp; data.</p>
+          <div class="legend" style="gap:8px">${vOrder.filter((v) => verdicts.has(v)).map((v) => `<button class="tag ${tagClass(v)}" style="border:0;cursor:pointer" data-verdict="${esc(v)}">${esc(v)} · ${verdicts.get(v).length}</button>`).join('')}</div>
+        </section>
+      </div>
+    </div>
+    <section style="margin-top:16px">
+      <h2>By launch day</h2>
+      <p class="note">Most recent first.</p>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>Day</th><th class="r">Ads</th><th class="r">Banned</th><th class="r">Spend</th><th class="r">Conv.</th><th class="r">CPA</th><th class="r hide-sm">Revenue</th></tr></thead>
+        <tbody>${days.map((d) => `<tr><td>${esc(d.d)}</td><td class="r">${int(d.n)}</td><td class="r ${d.banned ? 'neg' : 'muted'}">${int(d.banned)}</td><td class="r">${usd(d.spend)}</td><td class="r">${int(d.conv)}</td><td class="r">${d.cpa == null ? '<span class="muted">—</span>' : usd(d.cpa)}</td><td class="r hide-sm">${usd(d.rev)}</td></tr>`).join('')}</tbody>
+      </table></div>
+    </section>`;
+  el.querySelectorAll('[data-verdict]').forEach((b) => b.addEventListener('click', () => { adsFilter.verdict = b.dataset.verdict; go('ads'); }));
+}
+function tagClass(v) { return v === 'Winner' ? 't-win' : v === 'Watch' ? 't-watch' : v === 'Too early' ? 't-early' : 't-kill'; }
+
+/* ---- Summary ---- */
+const keyToDate = (k) => new Date(Math.floor(k / 10000), Math.floor(k / 100) % 100 - 1, k % 100);
+const dateToKey = (d) => d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+const fmtKey = (k) => { const d = keyToDate(k); return (d.getMonth() + 1) + '/' + d.getDate(); };
+const sum = { range: '7' };
+function period(range) {
+  const keys = state.ads.map((a) => dateKey(a.date)).filter(Boolean);
+  if (range === 'all' || !keys.length) return { ads: state.ads, prev: null, label: 'All time', from: 0, to: 99999999 };
+  const latest = Math.max(...keys);
+  const within = (from, to) => state.ads.filter((a) => { const k = dateKey(a.date); return k >= from && k <= to; });
+  if (range === '7' || range === '14') {
+    const n = +range, end = keyToDate(latest);
+    const start = new Date(end); start.setDate(end.getDate() - (n - 1));
+    const pEnd = new Date(start); pEnd.setDate(start.getDate() - 1);
+    const pStart = new Date(pEnd); pStart.setDate(pEnd.getDate() - (n - 1));
+    const from = dateToKey(start), pFrom = dateToKey(pStart), pTo = dateToKey(pEnd);
+    return { ads: within(from, latest), prev: within(pFrom, pTo), label: `${fmtKey(from)} – ${fmtKey(latest)}`, prevLabel: `the ${n} days before`, from, to: latest };
+  }
+  // a single launch day, compared with the launch day before it
+  const k = dateKey(range);
+  const earlier = [...new Set(keys.filter((x) => x < k))].sort((a, b) => b - a)[0];
+  return { ads: within(k, k), prev: earlier ? within(earlier, earlier) : null, label: range, prevLabel: earlier ? fmtKey(earlier) : '', from: k, to: k };
+}
+function delta(cur, prev, goodUp, fmt) {
+  if (cur == null || prev == null || !isFinite(cur) || !isFinite(prev)) return '';
+  if (prev === 0) return cur === 0 ? '<span class="dl">no change</span>' : `<span class="dl ${goodUp ? 'pos' : 'neg'}">up from ${fmt(0)}</span>`;
+  const ch = (cur - prev) / Math.abs(prev);
+  if (Math.abs(ch) < 0.005) return '<span class="dl">no change</span>';
+  const good = goodUp ? ch > 0 : ch < 0;
+  return `<span class="dl ${good ? 'pos' : 'neg'}">${ch > 0 ? '+' : '−'}${Math.round(Math.abs(ch) * 100)}%</span>`;
+}
+function renderSummary() {
+  const el = $('#view');
+  if (!state.ads.length) {
+    el.innerHTML = `<h1>Summary</h1><p class="lede">One page with everything that matters: your numbers, the keywords and choices that work, and what your ban log is telling you.</p>${emptyState('No data yet', 'Import your creative log (and spend log, if you have one) to fill this in.')}`;
+    bindPick(el); return;
+  }
+  const days = [...new Set(state.ads.map((a) => a.date).filter(Boolean))].sort((a, b) => dateKey(b) - dateKey(a));
+  const P = period(sum.range);
+  const A = agg(P.ads), B = P.prev && P.prev.length ? agg(P.prev) : null;
+  const lostA = A.n ? (A.banned + A.disapproved) / A.n : null, lostB = B && B.n ? (B.banned + B.disapproved) / B.n : null;
+  const vs = B ? `vs ${esc(P.prevLabel)}` : '';
+  // keywords for the period
+  const K = keywordStats(P.ads, 'both', 'hook');
+  const solidK = K.rows.filter((r) => r.n >= 3 && r.lift != null);
+  const topK = dedupeK(solidK.filter((r) => r.lift >= 1.15).sort((a, b) => b.lift - a.lift || b.word.length - a.word.length)).slice(0, 5);
+  const lowK = dedupeK(solidK.filter((r) => r.lift <= 0.85).sort((a, b) => a.lift - b.lift || b.word.length - a.word.length)).slice(0, 5);
+  // best ads
+  const bestAds = P.ads.filter((a) => (a.conversions || 0) > 0).sort((a, b) => (b.conversions - a.conversions) || ((a.spend || 0) / a.conversions - (b.spend || 0) / b.conversions)).slice(0, 5);
+  // best choice per dimension: lowest CPA among groups with 3+ ads that converted
+  const choices = [];
+  for (const [key, label, fn] of DIMS.filter((d) => ['hook_style', 'format', 'campaign', 'offer', 'parent', 'changed'].includes(d[0]))) {
+    const g = [...groupBy(P.ads, fn)].map(([v, l]) => ({ v, ...agg(l) })).filter((x) => x.n >= 3 && x.conv > 0 && x.spend > 0 && !/^Not logged$/.test(x.v));
+    if (g.length < 2) continue; // with one option there is nothing to compare
+    g.sort((a, b) => a.cpa - b.cpa);
+    choices.push({ label, best: g[0], worst: g[g.length - 1] });
+  }
+  // daily trend
+  const trendDays = [...groupBy(P.ads, (a) => a.date || 'No date')].map(([d, l]) => ({ d, k: dateKey(d), ...agg(l) })).filter((x) => x.k).sort((a, b) => a.k - b.k).slice(-14);
+  // ban log in the period
+  const bans = state.bans.filter((b) => { const k = dateKey(b.date); return sum.range === 'all' || (k >= P.from && k <= P.to); });
+  const reasons = [...groupBy(bans.filter((b) => b.reason), (b) => b.reason.trim())].sort((a, b) => b[1].length - a[1].length);
+  const lessons = bans.filter((b) => b.lesson).sort((a, b) => dateKey(b.date) - dateKey(a.date)).slice(0, 3);
+  const cash = state.spend.filter((x) => sum.range === 'all' || (dateKey(x.date) >= P.from && dateKey(x.date) <= P.to)).reduce((s, x) => s + (x.amount || 0), 0);
+
+  // one-line takeaway
+  const take = [];
+  if (A.cpa != null) take.push(`${int(A.conv)} conversions at ${usd(A.cpa)} each${B && B.cpa != null ? (A.cpa < B.cpa ? ', cheaper than before' : A.cpa > B.cpa ? ', pricier than before' : '') : ''}`);
+  else if (A.n) take.push(`${plural(A.n, 'ad')} launched, no conversions logged yet`);
+  if (topK[0]) take.push(`“${topK[0].word}” is your strongest hook keyword`);
+  if (lostA != null && lostA >= 0.3) take.push(`${pct(lostA)} of ads were banned or disapproved`);
+
+  el.innerHTML = `
+    <div class="sum-head">
+      <div>
+        <h1>Summary</h1>
+        <p class="lede" style="margin-bottom:0">${take.length ? esc(take.join('. ')) + '.' : 'Nothing logged for this period yet.'}</p>
+      </div>
+      <div class="toolbar no-print" style="margin:0">
+        <select id="srange" aria-label="Period">
+          <option value="7" ${sum.range === '7' ? 'selected' : ''}>Last 7 days</option>
+          <option value="14" ${sum.range === '14' ? 'selected' : ''}>Last 14 days</option>
+          <option value="all" ${sum.range === 'all' ? 'selected' : ''}>All time</option>
+          ${days.map((d) => `<option value="${esc(d)}" ${sum.range === d ? 'selected' : ''}>Only ${esc(d)}</option>`).join('')}
+        </select>
+        <button class="btn" id="sprint">Print or save PDF</button>
+      </div>
+    </div>
+    <p class="note" style="margin:8px 0 20px">${esc(P.label)} · ${plural(A.n, 'ad')}${B ? ` · changes are ${vs}` : ''}</p>
+
+    <section class="kpis">
+      <div class="kpi"><div class="lab">Ad spend</div><div class="num">${usd0(A.spend)}</div>${B ? delta(A.spend, B.spend, true, usd0) : ''}${state.spend.length ? `<div class="sub">${usd0(cash)} cash out</div>` : ''}</div>
+      <div class="kpi"><div class="lab">Conversions</div><div class="num">${int(A.conv)}</div>${B ? delta(A.conv, B.conv, true, int) : ''}</div>
+      <div class="kpi"><div class="lab">True CPA</div><div class="num">${A.cpa == null ? '—' : usd(A.cpa)}</div>${B && B.cpa != null && A.cpa != null ? delta(A.cpa, B.cpa, false, usd) : ''}</div>
+      <div class="kpi"><div class="lab">Revenue</div><div class="num">${usd0(A.rev)}</div>${B ? delta(A.rev, B.rev, true, usd0) : ''}<div class="sub">ROAS ${roasFmt(A.roas)}</div></div>
+      <div class="kpi"><div class="lab">Banned or disapproved</div><div class="num ${lostA >= 0.3 ? 'neg' : ''}">${pct(lostA)}</div>${lostB != null && lostA != null ? delta(lostA, lostB, false, pct) : ''}<div class="sub">${int(A.banned + A.disapproved)} of ${int(A.n)} ads</div></div>
+    </section>
+
+    <div class="grid2">
+      <section class="panel">
+        <h2>Keywords</h2>
+        <p class="note">From this period’s hooks, in 3+ ads. Score = conversions per dollar vs your average.</p>
+        ${!A.conv ? '<p class="note" style="margin:0">No conversions logged in this period, so there’s nothing to score.</p>' : `
+          <h3 class="h3">Working</h3>
+          ${topK.length ? `<div class="kchips">${topK.map((r) => `<span class="kchip up">${esc(r.word)} <b>${r.lift.toFixed(1)}×</b></span>`).join('')}</div>` : '<p class="note" style="margin:0">Nothing clearly ahead yet.</p>'}
+          <h3 class="h3">Not working</h3>
+          ${lowK.length ? `<div class="kchips">${lowK.map((r) => `<span class="kchip down">${esc(r.word)} <b>${r.lift.toFixed(1)}×</b></span>`).join('')}</div>` : '<p class="note" style="margin:0">Nothing clearly behind yet.</p>'}
+          <p class="no-print" style="margin:14px 0 0"><button class="link" data-goto="keywords">See every keyword</button></p>`}
+      </section>
+      <section class="panel">
+        <h2>Daily trend</h2>
+        <p class="note">Conversions per launch day, with what each one cost.</p>
+        ${trendDays.length ? trendChart(trendDays) : '<p class="note" style="margin:0">No dated ads in this period.</p>'}
+      </section>
+    </div>
+
+    <div class="grid2" style="margin-top:16px">
+      <section class="panel">
+        <h2>Best ads</h2>
+        <p class="note">Most conversions in this period.</p>
+        ${bestAds.length ? `<ol class="best">${bestAds.map((a) => `<li><div class="best-hook">${esc(a.hook || shortId(a.ad))}</div><div class="small">${esc(a.date)} · ${plural(a.conversions, 'conversion')} · ${a.spend ? usd(a.spend / a.conversions) + ' CPA' : 'no spend logged'}${a.hook_style ? ' · ' + esc(a.hook_style) : ''}</div></li>`).join('')}</ol>` : '<p class="note" style="margin:0">No ads with conversions in this period.</p>'}
+      </section>
+      <section class="panel">
+        <h2>Choices that worked best</h2>
+        <p class="note">For each kind of choice, the option with the lowest CPA (3+ ads), next to the most expensive.</p>
+        ${choices.length ? `<ul class="choices">${choices.map((c) => `<li><span class="small">${esc(c.label)}</span><div><b class="pos">${esc(c.best.v)}</b> ${usd(c.best.cpa)} CPA <span class="muted">· ${plural(c.best.n, 'ad')}</span></div><div class="small">Most expensive: ${esc(c.worst.v)} at ${usd(c.worst.cpa)}</div></li>`).join('')}</ul>` : '<p class="note" style="margin:0">Not enough ads with conversions yet to compare choices. Each option needs 3+ ads.</p>'}
+      </section>
+    </div>
+
+    <section class="panel" style="margin-top:16px">
+      <h2>From your ban log</h2>
+      <p class="note">${bans.length ? `${plural(bans.length, 'entry', 'entries')} in this period.` : 'Nothing logged in this period.'}</p>
+      ${bans.length ? `<div class="grid2">
+        <div><h3 class="h3" style="margin-top:0">Most common reasons</h3>${reasons.length ? `<ul class="choices">${reasons.slice(0, 4).map(([r, l]) => `<li><div><b>${esc(r)}</b> <span class="muted">×${l.length}</span></div></li>`).join('')}</ul>` : '<p class="note">No reasons filled in yet — add them on the Ban log tab.</p>'}</div>
+        <div><h3 class="h3" style="margin-top:0">Latest lessons</h3>${lessons.length ? `<ul class="choices">${lessons.map((b) => `<li><span class="small">${esc(b.date)}</span><div>${esc(b.lesson)}</div></li>`).join('')}</ul>` : '<p class="note">No lessons written yet.</p>'}</div>
+      </div>` : ''}
+    </section>`;
+  $('#srange').addEventListener('change', (e) => { sum.range = e.target.value; renderSummary(); });
+  $('#sprint').addEventListener('click', () => { try { window.print(); } catch (e) { toast('Printing isn’t available here — open the file in your browser.'); } });
+  el.querySelectorAll('[data-goto]').forEach((b) => b.addEventListener('click', () => go(b.dataset.goto)));
+}
+function trendChart(days) {
+  const W = 560, H = 190, padL = 8, padR = 8, top = 22, bottom = 26;
+  const max = Math.max(1, ...days.map((d) => d.conv));
+  const bw = (W - padL - padR) / days.length;
+  const bar = Math.min(32, bw * 0.62);
+  const y = (v) => top + (H - top - bottom) * (1 - v / max);
+  return `<svg class="trend" viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="${esc(days.map((d) => `${d.d}: ${d.conv} conversions`).join(', '))}">
+    <line x1="${padL}" x2="${W - padR}" y1="${H - bottom}" y2="${H - bottom}" class="axis"/>
+    ${days.map((d, i) => {
+      const cx = padL + bw * i + bw / 2, h = (H - bottom) - y(d.conv);
+      return `<g><rect x="${(cx - bar / 2).toFixed(1)}" y="${y(d.conv).toFixed(1)}" width="${bar.toFixed(1)}" height="${Math.max(h, d.conv ? 2 : 0).toFixed(1)}" rx="4" class="${d.conv ? 'b' : 'b0'}"/>
+        <text x="${cx.toFixed(1)}" y="${(y(d.conv) - 6).toFixed(1)}" class="v">${d.conv}${d.cpa != null && days.length <= 10 ? ` · ${usd(d.cpa)}` : ''}</text>
+        <text x="${cx.toFixed(1)}" y="${H - 8}" class="x">${esc(d.d)}</text></g>`;
+    }).join('')}
+  </svg>`;
+}
+
+/* ---- Ads ---- */
+const adsFilter = { q: '', verdict: '', status: '', date: '', sort: 'date', dir: -1, open: null };
+function renderAds() {
+  const el = $('#view');
+  if (!state.ads.length) { el.innerHTML = `<h1>Ads</h1>${emptyState('No ads yet', 'Import your creative log CSV to see every ad here.')}`; bindPick(el); return; }
+  const statuses = [...new Set(state.ads.map((a) => a.status || 'No status'))].sort();
+  const dates = [...new Set(state.ads.map((a) => a.date).filter(Boolean))].sort((a, b) => dateKey(b) - dateKey(a));
+  el.innerHTML = `
+    <h1>Ads</h1>
+    <p class="lede">Every ad you’ve logged. Click a row for its full details.</p>
+    <div class="toolbar">
+      <input type="search" id="q" placeholder="Search hooks, captions, sounds, notes…" aria-label="Search ads" value="${esc(adsFilter.q)}">
+      <select id="fv" aria-label="Verdict"><option value="">All verdicts</option>${['Winner', 'Watch', 'Too early', 'Kill', 'Disapproved', 'Banned'].map((v) => `<option ${adsFilter.verdict === v ? 'selected' : ''}>${v}</option>`).join('')}</select>
+      <select id="fs" aria-label="Status"><option value="">All statuses</option>${statuses.map((s) => `<option ${adsFilter.status === s ? 'selected' : ''}>${esc(s)}</option>`).join('')}</select>
+      <select id="fd" aria-label="Launch day"><option value="">All days</option>${dates.map((d) => `<option ${adsFilter.date === d ? 'selected' : ''}>${esc(d)}</option>`).join('')}</select>
+      <button class="btn" id="dl">Download CSV</button>
+    </div>
+    <p class="note" id="ads-sum"></p>
+    <div class="tbl-wrap"><table id="ads-tbl">
+      <thead><tr>
+        <th data-k="date"><button>Date</button></th>
+        <th data-k="hook"><button>Hook</button></th>
+        <th data-k="status" class="hide-sm"><button>Status</button></th>
+        <th data-k="verdict"><button>Verdict</button></th>
+        <th data-k="spend" class="r"><button>Spend</button></th>
+        <th data-k="conversions" class="r"><button>Conv.</button></th>
+        <th data-k="cpa" class="r"><button>CPA</button></th>
+        <th data-k="revenue" class="r hide-sm"><button>Revenue</button></th>
+        <th data-k="roas" class="r hide-sm"><button>ROAS</button></th>
+      </tr></thead><tbody></tbody></table></div>`;
+  const draw = () => {
+    const q = adsFilter.q.toLowerCase();
+    let rows = state.ads.filter((a) =>
+      (!q || [a.hook, a.caption, a.sound, a.notes, a.visual, a.status, a.offer, a.campaign].join(' ').toLowerCase().includes(q)) &&
+      (!adsFilter.verdict || verdict(a).t === adsFilter.verdict) &&
+      (!adsFilter.status || (a.status || 'No status') === adsFilter.status) &&
+      (!adsFilter.date || a.date === adsFilter.date));
+    const val = (a) => {
+      switch (adsFilter.sort) {
+        case 'date': return dateKey(a.date);
+        case 'cpa': return a.conversions ? a.spend / a.conversions : null;
+        case 'roas': return a.spend ? (a.revenue || 0) / a.spend : null;
+        case 'verdict': return verdict(a).t;
+        default: return a[adsFilter.sort];
+      }
+    };
+    rows.sort((x, y) => {
+      const a = val(x), b = val(y);
+      if (a == null || a === '') return 1; if (b == null || b === '') return -1;
+      return (typeof a === 'number' ? a - b : String(a).localeCompare(String(b))) * adsFilter.dir;
+    });
+    const S = agg(rows);
+    $('#ads-sum').textContent = `${plural(rows.length, 'ad')} · ${usd(S.spend)} spent · ${int(S.conv)} conversions · CPA ${S.cpa == null ? '—' : usd(S.cpa)}`;
+    document.querySelectorAll('#ads-tbl th').forEach((th) => th.setAttribute('aria-sort', th.dataset.k === adsFilter.sort ? (adsFilter.dir > 0 ? 'ascending' : 'descending') : 'none'));
+    const tb = $('#ads-tbl tbody');
+    if (!rows.length) { tb.innerHTML = `<tr><td colspan="9" class="empty">No ads match. Clear a filter to see more.</td></tr>`; return; }
+    tb.innerHTML = rows.map((a) => {
+      const v = verdict(a), cpa = a.conversions ? a.spend / a.conversions : null, roas = a.spend ? (a.revenue || 0) / a.spend : null;
+      const open = adsFilter.open === a.id;
+      return `<tr class="row" data-id="${a.id}" aria-expanded="${open}">
+        <td>${esc(a.date)}</td>
+        <td class="hook">${esc(a.hook) || `<span class="muted">${esc(shortId(a.ad))}</span>`}</td>
+        <td class="hide-sm">${esc(a.status) || '<span class="muted">—</span>'}</td>
+        <td><span class="tag ${tagClass(v.t)}">${v.t}</span></td>
+        <td class="r">${a.spend == null ? '<span class="muted">—</span>' : usd(a.spend)}</td>
+        <td class="r">${a.conversions == null ? '<span class="muted">—</span>' : int(a.conversions)}</td>
+        <td class="r">${cpa == null ? '<span class="muted">—</span>' : usd(cpa)}</td>
+        <td class="r hide-sm">${a.revenue == null ? '<span class="muted">—</span>' : usd(a.revenue)}</td>
+        <td class="r hide-sm">${roasFmt(roas)}</td></tr>
+        ${open ? `<tr class="detail"><td colspan="9"><div class="kv">
+          ${[['Link', a.ad ? `<a href="${esc(a.ad)}" target="_blank" rel="noopener">${esc(a.ad)}</a>` : ''], ['Parent creative', a.parent ? `<a href="${esc(a.parent)}" target="_blank" rel="noopener">${esc(shortId(a.parent))}</a>` : 'Original'],
+            ['What changed', esc(a.changed)], ['Offer', esc([a.offer, a.offer_type].filter(Boolean).join(' · '))], ['Format', esc(a.format)], ['Hook style', esc(a.hook_style)],
+            ['Visual', esc(a.visual)], ['Sound', esc(a.sound)], ['Caption', esc(a.caption)], ['Campaign / bid', esc(a.campaign)], ['Account / BC', esc(a.account)], ['Notes', esc(a.notes)], ['Imported from', esc(a.source)]]
+            .filter(([, v]) => v).map(([k, v]) => `<div><span>${k}</span>${v.replace(/\n/g, '<br>')}</div>`).join('')}
+        </div></td></tr>` : ''}`;
+    }).join('');
+  };
+  draw();
+  $('#q').addEventListener('input', (e) => { adsFilter.q = e.target.value; draw(); });
+  $('#fv').addEventListener('change', (e) => { adsFilter.verdict = e.target.value; draw(); });
+  $('#fs').addEventListener('change', (e) => { adsFilter.status = e.target.value; draw(); });
+  $('#fd').addEventListener('change', (e) => { adsFilter.date = e.target.value; draw(); });
+  document.querySelectorAll('#ads-tbl th').forEach((th) => th.querySelector('button').addEventListener('click', () => {
+    const k = th.dataset.k;
+    if (adsFilter.sort === k) adsFilter.dir *= -1; else { adsFilter.sort = k; adsFilter.dir = ['hook', 'status', 'verdict'].includes(k) ? 1 : -1; }
+    draw();
+  }));
+  $('#ads-tbl tbody').addEventListener('click', (e) => {
+    if (e.target.closest('a')) return;
+    const tr = e.target.closest('tr.row'); if (!tr) return;
+    adsFilter.open = adsFilter.open === tr.dataset.id ? null : tr.dataset.id; draw();
+  });
+  $('#dl').addEventListener('click', () => {
+    const cols = ['date', 'hook', 'status', 'spend', 'conversions', 'revenue', 'offer', 'offer_type', 'parent', 'changed', 'format', 'hook_style', 'visual', 'sound', 'caption', 'campaign', 'account', 'ad', 'notes'];
+    download('ads.csv', toCSV([[...cols, 'verdict'], ...state.ads.map((a) => [...cols.map((c) => a[c]), verdict(a).t])]), 'text/csv');
+  });
+}
+
+/* ---- Keywords ---- */
+// Words that carry no meaning on their own. Phrases can still contain them ("student id", "got paid").
+const KW_STOP = new Set(('a an the and or but so to of in on at by for with from as is are was were be been am do does did ' +
+  'i im me my mine u you ur your yall we us our they them their he she it its this that these those ts ' +
+  'not no yes just when how what why who where which if then than too very can will would could should ' +
+  'have has had got get gets all any some one up out about into over after before bc cuz').split(' '));
+const isEmoji = (w) => /\p{Extended_Pictographic}/u.test(w);
+// "qiuizz" and "qiuiz", "bandss" and "bands" count as the same word
+const kwKey = (w) => isEmoji(w) ? w : w.replace(/(\p{L})\1+/gu, '$1');
+function kwTokens(text, mode) {
+  const raw = (String(text || '').toLowerCase().replace(/['’]/g, '').match(/\p{Extended_Pictographic}|[\p{L}\p{N}]+/gu) || []);
+  const out = new Map(); // key -> original spelling
+  if (mode !== 'phrases') raw.forEach((w) => { if (isEmoji(w) || (w.length > 1 && !KW_STOP.has(w) && !/^\d+$/.test(w))) out.set(kwKey(w), w); });
+  if (mode !== 'words') for (let i = 0; i < raw.length - 1; i++) {
+    const a = raw[i], b = raw[i + 1];
+    if (isEmoji(a) || isEmoji(b)) continue;
+    if (KW_STOP.has(a) && KW_STOP.has(b)) continue;
+    if (a.length < 2 && b.length < 2) continue;
+    out.set(kwKey(a) + ' ' + kwKey(b), a + ' ' + b);
+  }
+  return out;
+}
+const kw = { mode: 'both', src: 'hook', range: 'all', sort: 'lift', dir: -1, open: null };
+function kwRangeAds() {
+  const ads = state.ads;
+  if (kw.range === 'all') return ads;
+  const latest = Math.max(...ads.map((a) => dateKey(a.date)));
+  if (kw.range === '7' || kw.range === '14') {
+    const d = new Date(String(latest).replace(/^(\d{4})(\d{2})(\d{2})$/, '$1-$2-$3') + 'T00:00:00');
+    d.setDate(d.getDate() - (+kw.range - 1));
+    const from = d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+    return ads.filter((a) => dateKey(a.date) >= from);
+  }
+  return ads.filter((a) => a.date === kw.range);
+}
+function keywordStats(ads, mode, src) {
+  const ignored = new Set(state.ignored || []);
+  const total = agg(ads);
+  const useSpend = total.spend > 0;
+  // baseline: conversions per dollar across these ads (or per ad when nothing has spend logged)
+  const base = useSpend ? total.conv / total.spend : (ads.length ? total.conv / ads.length : 0);
+  const m = useSpend ? Math.max(1, state.rules.minSpend || 10) : 3; // how much evidence a keyword needs before it moves away from average
+  const map = new Map();
+  ads.forEach((a) => {
+    const text = src === 'both' ? (a.hook || '') + ' ' + (a.caption || '') : (a.hook || '');
+    kwTokens(text, mode).forEach((orig, key) => {
+      if (ignored.has(key)) return;
+      let e = map.get(key);
+      if (!e) { e = { key, spell: new Map(), ads: [] }; map.set(key, e); }
+      e.ads.push(a); e.spell.set(orig, (e.spell.get(orig) || 0) + 1);
+    });
+  });
+  const rows = [];
+  map.forEach((e) => {
+    if (e.ads.length < 2) return; // a word in one ad is that ad, not a pattern
+    const s = agg(e.ads);
+    const restSpend = total.spend - s.spend, restConv = total.conv - s.conv;
+    const exposure = useSpend ? s.spend : s.n;
+    const rate = exposure ? s.conv / exposure : 0;
+    const smoothed = (s.conv + m * base) / (exposure + m);
+    rows.push({
+      key: e.key, word: [...e.spell].sort((x, y) => y[1] - x[1])[0][0], phrase: e.key.includes(' '),
+      n: s.n, spend: s.spend, conv: s.conv, rev: s.rev, cpa: s.cpa, roas: s.roas,
+      cpaRest: restConv ? restSpend / restConv : null,
+      lost: (s.banned + s.disapproved) / s.n,
+      lift: base ? smoothed / base : null, rawLift: base ? rate / base : null,
+      ads: e.ads,
+    });
+  });
+  return { rows, total, base, useSpend };
+}
+const kwConfidence = (n) => n >= 10 ? 'Solid' : n >= 5 ? 'Early read' : 'Thin';
+// drop a single word when a phrase already shown covers exactly the same ads ("student" inside "student id")
+function dedupeK(list) {
+  const out = [];
+  for (const r of list) {
+    if (!r.phrase && out.some((p) => p.phrase && p.key.split(' ').includes(r.key) && p.n === r.n && p.conv === r.conv)) continue;
+    out.push(r);
+  }
+  return out;
+}
+function renderKeywords() {
+  const el = $('#view');
+  if (!state.ads.length) { el.innerHTML = `<h1>Keywords</h1>${emptyState('No ads yet', 'Import your creative log to see which words in your hooks bring conversions.')}`; bindPick(el); return; }
+  const ads = kwRangeAds();
+  const { rows, total, base, useSpend } = keywordStats(ads, kw.mode, kw.src);
+  const val = (r) => r[kw.sort];
+  rows.sort((a, b) => {
+    const x = val(a), y = val(b);
+    if (x == null) return 1; if (y == null) return -1;
+    return (typeof x === 'number' ? x - y : String(x).localeCompare(String(y))) * kw.dir || b.n - a.n;
+  });
+  const solid = rows.filter((r) => r.n >= 3 && r.lift != null);
+  const working = dedupeK([...solid].filter((r) => r.lift >= 1.15).sort((a, b) => b.lift - a.lift || b.word.length - a.word.length)).slice(0, 8);
+  const dragging = dedupeK([...solid].filter((r) => r.lift <= 0.85).sort((a, b) => a.lift - b.lift || b.word.length - a.word.length)).slice(0, 8);
+  const days = [...new Set(state.ads.map((a) => a.date).filter(Boolean))].sort((a, b) => dateKey(b) - dateKey(a));
+  const maxLift = Math.max(2, ...rows.map((r) => r.lift || 0));
+  const chip = (r, cls) => `<button class="kchip ${cls}" data-open="${esc(r.key)}">${esc(r.word)} <b>${r.lift.toFixed(1)}×</b></button>`;
+  const liftBar = (l) => {
+    if (l == null) return '<span class="muted">—</span>';
+    const w = Math.min(50, Math.abs(Math.log2(l)) / Math.log2(maxLift) * 50);
+    return `<div class="lift"><span class="lift-track"><i class="${l >= 1 ? 'up' : 'down'}" style="width:${w.toFixed(1)}%"></i></span><span class="lift-num">${l.toFixed(2)}×</span></div>`;
+  };
+  const rangeLabel = kw.range === 'all' ? 'all time' : kw.range === '7' ? 'the last 7 days' : kw.range === '14' ? 'the last 14 days' : kw.range;
+  el.innerHTML = `
+    <h1>Keywords</h1>
+    <p class="lede">Every hook is broken into words and two-word phrases. Each one is scored by how many conversions its ads got per dollar, against the average for all your ads. Above 1× means ads with that word convert better.</p>
+    <div class="toolbar">
+      <div class="seg" role="group" aria-label="Look at">
+        ${[['both', 'Words + phrases'], ['words', 'Words'], ['phrases', 'Phrases']].map(([k, l]) => `<button data-kmode="${k}" aria-pressed="${kw.mode === k}">${l}</button>`).join('')}
+      </div>
+      <div class="seg" role="group" aria-label="Read from">
+        ${[['hook', 'Hook'], ['both', 'Hook + caption']].map(([k, l]) => `<button data-ksrc="${k}" aria-pressed="${kw.src === k}">${l}</button>`).join('')}
+      </div>
+      <select id="krange" aria-label="Date range">
+        <option value="all" ${kw.range === 'all' ? 'selected' : ''}>All time</option>
+        <option value="7" ${kw.range === '7' ? 'selected' : ''}>Last 7 days</option>
+        <option value="14" ${kw.range === '14' ? 'selected' : ''}>Last 14 days</option>
+        ${days.map((d) => `<option value="${esc(d)}" ${kw.range === d ? 'selected' : ''}>Only ${esc(d)}</option>`).join('')}
+      </select>
+    </div>
+    <p class="note">${plural(ads.length, 'ad')} from ${esc(rangeLabel)} · average ${useSpend ? `${base.toFixed(2)} conversions per $1 (CPA ${total.cpa == null ? '—' : usd(total.cpa)})` : `${base.toFixed(2)} conversions per ad — log spend to score per dollar`}</p>
+    ${!total.conv ? `<div class="panel empty"><p class="note" style="margin:0">None of these ads have conversions logged yet, so there’s nothing to score. Fill in the Conversions column and re-import.</p></div>` : `
+    <div class="grid2" style="margin-bottom:16px">
+      <section class="panel">
+        <h2>Pulling their weight</h2>
+        <p class="note">In 3+ ads and converting at least 15% better than average.</p>
+        ${working.length ? `<div class="kchips">${working.map((r) => chip(r, 'up')).join('')}</div>` : '<p class="note" style="margin:0">Nothing clears the bar yet. More ads with conversions will sharpen this.</p>'}
+      </section>
+      <section class="panel">
+        <h2>Dragging you down</h2>
+        <p class="note">In 3+ ads and converting at least 15% worse than average.</p>
+        ${dragging.length ? `<div class="kchips">${dragging.map((r) => chip(r, 'down')).join('')}</div>` : '<p class="note" style="margin:0">Nothing clearly underperforming yet.</p>'}
+      </section>
+    </div>
+    <div class="tbl-wrap"><table id="kw-tbl">
+      <thead><tr>
+        ${[['word', 'Keyword', ''], ['n', 'Ads', 'r'], ['spend', 'Spend', 'r hide-sm'], ['conv', 'Conv.', 'r'], ['cpa', 'CPA', 'r'], ['cpaRest', 'CPA without it', 'r hide-sm'], ['lift', 'Score', ''], ['roas', 'ROAS', 'r hide-sm'], ['lost', 'Banned / disapproved', 'r hide-sm']]
+          .map(([k, l, c]) => `<th class="${c}" data-k="${k}" aria-sort="${kw.sort === k ? (kw.dir > 0 ? 'ascending' : 'descending') : 'none'}"><button>${l}</button></th>`).join('')}
+      </tr></thead>
+      <tbody>${rows.length ? rows.map((r) => `
+        <tr class="row ${r.n < 3 ? 'muted' : ''}" data-key="${esc(r.key)}">
+          <td><b class="kw">${esc(r.word)}</b> <span class="small">${kwConfidence(r.n)}</span></td>
+          <td class="r">${int(r.n)}</td>
+          <td class="r hide-sm">${usd(r.spend)}</td>
+          <td class="r">${int(r.conv)}</td>
+          <td class="r">${r.cpa == null ? '<span class="muted">—</span>' : usd(r.cpa)}</td>
+          <td class="r hide-sm">${r.cpaRest == null ? '<span class="muted">—</span>' : usd(r.cpaRest)}</td>
+          <td>${liftBar(r.lift)}</td>
+          <td class="r hide-sm">${roasFmt(r.roas)}</td>
+          <td class="r hide-sm ${r.lost >= 0.5 ? 'neg' : ''}">${pct(r.lost)}</td>
+        </tr>
+        ${kw.open === r.key ? `<tr class="detail"><td colspan="9">
+          <div class="toolbar" style="justify-content:space-between;margin-bottom:8px"><b>${plural(r.n, 'ad')} using “${esc(r.word)}”</b><button class="btn" data-ignore="${esc(r.key)}">Ignore this keyword</button></div>
+          <table class="mini"><tbody>${[...r.ads].sort((a, b) => (b.conversions || 0) - (a.conversions || 0)).map((a) => `<tr><td>${esc(a.date)}</td><td>${highlight(a.hook, r.key)}</td><td class="r">${a.spend == null ? '—' : usd(a.spend)}</td><td class="r">${a.conversions == null ? '—' : plural(a.conversions, 'conv.', 'conv.')}</td><td>${esc(a.status)}</td></tr>`).join('')}</tbody></table>
+        </td></tr>` : ''}`).join('') : `<tr><td colspan="9" class="empty">No word shows up in 2 or more ads in this range yet.</td></tr>`}</tbody>
+    </table></div>
+    <p class="note" style="margin-top:12px">How the score works: conversions ÷ spend for ads with the keyword, divided by the same for all ads in the range. Keywords with little spend behind them are pulled toward 1× (as if they had ${useSpend ? usd(Math.max(1, state.rules.minSpend || 10)) : '3 ads'} of average results added), so one lucky ad can’t top the list. “Thin” = under 5 ads, “Early read” = 5–9, “Solid” = 10+. Spellings like “qiuiz” and “qiuizz” count as one word.</p>`}
+    ${(state.ignored || []).length ? `<p class="note">Ignored: ${state.ignored.map((k) => `<button class="link" data-unignore="${esc(k)}">${esc(k)} ✕</button>`).join(' ')}</p>` : ''}`;
+  el.querySelectorAll('[data-kmode]').forEach((b) => b.addEventListener('click', () => { kw.mode = b.dataset.kmode; renderKeywords(); }));
+  el.querySelectorAll('[data-ksrc]').forEach((b) => b.addEventListener('click', () => { kw.src = b.dataset.ksrc; renderKeywords(); }));
+  const kr = $('#krange'); if (kr) kr.addEventListener('change', () => { kw.range = kr.value; kw.open = null; renderKeywords(); });
+  el.querySelectorAll('#kw-tbl > thead th').forEach((th) => th.querySelector('button').addEventListener('click', () => {
+    const k = th.dataset.k; if (kw.sort === k) kw.dir *= -1; else { kw.sort = k; kw.dir = k === 'word' || k === 'cpa' || k === 'cpaRest' || k === 'lost' ? 1 : -1; } renderKeywords();
+  }));
+  const tb = $('#kw-tbl > tbody');
+  if (tb) tb.addEventListener('click', (e) => {
+    const ig = e.target.closest('[data-ignore]');
+    if (ig) { state.ignored = [...new Set([...(state.ignored || []), ig.dataset.ignore])]; kw.open = null; save(); renderKeywords(); return; }
+    const tr = e.target.closest('tr.row'); if (!tr) return;
+    kw.open = kw.open === tr.dataset.key ? null : tr.dataset.key; renderKeywords();
+  });
+  el.querySelectorAll('[data-open]').forEach((b) => b.addEventListener('click', () => {
+    kw.open = b.dataset.open; renderKeywords();
+    const row = [...document.querySelectorAll('#kw-tbl tr.row')].find((r) => r.dataset.key === kw.open);
+    if (row && row.scrollIntoView) row.scrollIntoView({ block: 'center' });
+  }));
+  el.querySelectorAll('[data-unignore]').forEach((b) => b.addEventListener('click', () => { state.ignored = state.ignored.filter((k) => k !== b.dataset.unignore); save(); renderKeywords(); }));
+}
+function highlight(text, key) {
+  const parts = key.split(' ');
+  // split keeps the matched words at odd positions; mark the ones whose spelling-merged form is in the keyword
+  return String(text || '').split(/(\p{Extended_Pictographic}|[\p{L}\p{N}'’]+)/gu)
+    .map((seg, i) => (i % 2 && parts.includes(kwKey(seg.toLowerCase().replace(/['’]/g, '')))) ? `<mark>${esc(seg)}</mark>` : esc(seg))
+    .join('');
+}
+
+/* ---- Patterns ---- */
+const DIMS = [
+  ['parent', 'Parent creative', (a) => a.parent ? shortId(a.parent) : 'Originals'],
+  ['changed', 'What changed', (a) => (a.changed || 'Not logged').split(/\s*,\s*/).filter(Boolean)],
+  ['hook_style', 'Hook style', (a) => a.hook_style || 'Not logged'],
+  ['format', 'Format', (a) => a.format || 'Not logged'],
+  ['offer', 'Offer', (a) => a.offer || 'Not logged'],
+  ['campaign', 'Campaign style / bid', (a) => a.campaign || 'Not logged'],
+  ['launch_hour', 'Launch hour', (a) => a.launch_hour !== '' && a.launch_hour != null ? a.launch_hour + ':00' : 'Not logged'],
+  ['date', 'Launch day', (a) => a.date || 'No date'],
+];
+const pat = { dim: 'parent', sort: 'n', dir: -1 };
+function renderPatterns() {
+  const el = $('#view');
+  if (!state.ads.length) { el.innerHTML = `<h1>Patterns</h1>${emptyState('No ads yet', 'Import your creative log to see what your winners have in common.')}`; bindPick(el); return; }
+  const dim = DIMS.find((d) => d[0] === pat.dim) || DIMS[0];
+  const groups = [...groupBy(state.ads, dim[2])].map(([k, l]) => ({ k, ...agg(l) }));
+  const val = (g) => g[pat.sort];
+  groups.sort((a, b) => { const x = val(a), y = val(b); if (x == null) return 1; if (y == null) return -1; return (typeof x === 'number' ? x - y : String(x).localeCompare(String(y))) * pat.dir; });
+  const maxSpend = Math.max(...groups.map((g) => g.spend), 0.01);
+  const min = state.rules.minGroup;
+  const cols = [['k', dim[1], ''], ['n', 'Ads', 'r'], ['spend', 'Spend', 'r'], ['conv', 'Conv.', 'r'], ['cpa', 'CPA', 'r'], ['rev', 'Revenue', 'r hide-sm'], ['roas', 'ROAS', 'r hide-sm'], ['banRate', 'Banned', 'r']];
+  el.innerHTML = `
+    <h1>Patterns</h1>
+    <p class="lede">Group your ads by one thing at a time to see which choices hold up. Groups under ${int(min)} ads are greyed out — too few to trust yet.</p>
+    <div class="toolbar"><div class="seg" role="group" aria-label="Group by">${DIMS.map((d) => `<button aria-pressed="${d[0] === pat.dim}" data-dim="${d[0]}">${d[1]}</button>`).join('')}</div></div>
+    <div class="tbl-wrap"><table id="pat-tbl">
+      <thead><tr>${cols.map(([k, l, c]) => `<th class="${c}" data-k="${k}" aria-sort="${pat.sort === k ? (pat.dir > 0 ? 'ascending' : 'descending') : 'none'}"><button>${l}</button></th>`).join('')}</tr></thead>
+      <tbody>${groups.map((g) => `<tr class="${g.n < min ? 'muted' : ''}">
+        <td>${esc(g.k)}</td><td class="r">${int(g.n)}</td>
+        <td class="r"><div class="bar-cell"><i style="width:${Math.max(2, 60 * g.spend / maxSpend)}px"></i>${usd(g.spend)}</div></td>
+        <td class="r">${int(g.conv)}</td><td class="r">${g.cpa == null ? '—' : usd(g.cpa)}</td>
+        <td class="r hide-sm">${usd(g.rev)}</td><td class="r hide-sm">${roasFmt(g.roas)}</td>
+        <td class="r ${g.banRate ? 'neg' : ''}">${pct(g.banRate)}</td></tr>`).join('')}</tbody>
+    </table></div>`;
+  el.querySelectorAll('[data-dim]').forEach((b) => b.addEventListener('click', () => { pat.dim = b.dataset.dim; renderPatterns(); }));
+  el.querySelectorAll('#pat-tbl th').forEach((th) => th.querySelector('button').addEventListener('click', () => {
+    const k = th.dataset.k; if (pat.sort === k) pat.dir *= -1; else { pat.sort = k; pat.dir = k === 'k' ? 1 : -1; } renderPatterns();
+  }));
+}
+
+/* ---- Ban log ---- */
+const BAN_KINDS = ['Ad disapproved', 'Ad account suspended', 'Business Center banned', 'Other'];
+const STOP = new Set('the a an and or to of in on for with my me i u you ur your is it its this that ts so be bc at by from we our us yall y’all just when how what why not no all'.split(' '));
+function threads() {
+  const ads = state.ads; if (ads.length < 4) return null;
+  const banned = ads.filter((a) => isBanned(a) || isDisapproved(a));
+  const others = ads.filter((a) => !isBanned(a) && !isDisapproved(a) && a.status);
+  const base = banned.length / ads.length;
+  // traits that show up more often in banned ads
+  const traits = [];
+  for (const [key, label, fn] of DIMS.filter((d) => d[0] !== 'date' && d[0] !== 'launch_hour')) {
+    for (const [val, list] of groupBy(ads, fn)) {
+      if (/^(Not logged|Originals)$/.test(val) || list.length < 3) continue;
+      const b = list.filter((a) => isBanned(a) || isDisapproved(a)).length;
+      traits.push({ label, val, n: list.length, b, rate: b / list.length });
+    }
+  }
+  traits.sort((x, y) => y.rate - x.rate || y.n - x.n);
+  // words in hooks and captions
+  const words = (a) => new Set(String((a.hook || '') + ' ' + (a.caption || '')).toLowerCase().replace(/[^\p{L}\p{N}\p{Extended_Pictographic}\s']/gu, ' ').split(/\s+/).filter((w) => w.length > 2 && !STOP.has(w) || /\p{Extended_Pictographic}/u.test(w)));
+  const wc = new Map();
+  banned.forEach((a) => words(a).forEach((w) => { const e = wc.get(w) || { w, b: 0, o: 0 }; e.b++; wc.set(w, e); }));
+  others.forEach((a) => words(a).forEach((w) => { const e = wc.get(w); if (e) e.o++; }));
+  const topWords = [...wc.values()].filter((e) => e.b >= Math.max(3, Math.ceil(banned.length * 0.15))).sort((x, y) => y.b - x.b).slice(0, 12);
+  const notes = banned.filter((a) => a.notes && !/^testing$/i.test(a.notes)).map((a) => ({ date: a.date, hook: a.hook, notes: a.notes }));
+  return { banned: banned.length, others: others.length, total: ads.length, base, traits: traits.filter((t) => t.rate >= Math.min(0.99, base + 0.1) || t.rate === 1).slice(0, 8), topWords, notes };
+}
+function renderBans() {
+  const el = $('#view');
+  const T = threads();
+  const bans = [...state.bans].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  const reasons = groupBy(state.bans.filter((b) => b.reason), (b) => b.reason.trim().toLowerCase());
+  const today = new Date().toISOString().slice(0, 10);
+  const N = knownNames();
+  el.innerHTML = `
+    <h1>Ban log</h1>
+    <p class="lede">Write down every ban and disapproval with the reason TikTok gave and what was running, so the pattern is in front of you before your next launch.</p>
+    <div class="drop drop-slim" data-pick tabindex="0" role="button" style="margin-bottom:16px"><strong>Import ban history or account names</strong>Drop a CSV — past bans (Date, Ad account, BC, Reason…) become log entries; a list of ad accounts and BCs fills the pick-lists below.${N.accounts.length + N.bcs.length ? ` <span class="small">You have ${plural(N.accounts.length, 'ad account')} and ${plural(N.bcs.length, 'BC')} in your pick-list.</span>` : ''}</div>
+    <details class="panel paste" style="margin:-4px 0 16px">
+      <summary>Paste a table copied from TikTok instead</summary>
+      <ol class="steps" style="margin:10px 0">
+        <li>In Business Center, open Advertiser accounts.</li>
+        <li>Select the table from its header row down to the last account, and copy it.</li>
+        <li>Paste it here. The header row has to come along — it’s how the app knows which column is the name, ID and status.</li>
+      </ol>
+      <textarea id="paste" rows="5" placeholder="Paste here"></textarea>
+      <div style="margin-top:8px"><button class="btn primary" id="paste-go">Import pasted table</button></div>
+    </details>
+    ${lastLog.length && lastLog.some((r) => r.kind === 'bans' || r.kind === 'names' || !r.ok) ? `<ul class="log" style="margin:-4px 0 16px">${lastLog.map((r) => `<li><span>${esc(r.name)}</span><span class="${r.ok ? 'ok' : 'err'}">${esc(r.msg)}</span></li>`).join('')}</ul>` : ''}
+    <div class="grid2">
+      <section class="panel">
+        <h2>Log a ban</h2>
+        <p class="note">The reason is the most useful part — copy it from TikTok’s notice word for word.</p>
+        <div class="stack" style="gap:10px">
+          <div class="rules">
+            <label>Date<input type="date" id="b-date" value="${today}"></label>
+            <label>What got hit<select id="b-kind">${BAN_KINDS.map((k) => `<option>${k}</option>`).join('')}</select></label>
+          </div>
+          <div class="rules">
+            <label>Ad account<input type="text" id="b-acct" list="dl-acct" placeholder="${N.accounts.length ? 'Pick or type a name' : 'Name or ID'}" autocomplete="off"></label>
+            <label>Business Center<input type="text" id="b-bc" list="dl-bc" placeholder="${N.bcs.length ? 'Pick or type a name' : 'Name or ID'}" autocomplete="off"></label>
+          </div>
+          <datalist id="dl-acct">${N.accounts.map((n) => `<option value="${esc(n)}">`).join('')}</datalist>
+          <datalist id="dl-bc">${N.bcs.map((n) => `<option value="${esc(n)}">`).join('')}</datalist>
+          <label class="field">Reason TikTok gave<input type="text" id="b-reason" placeholder="e.g. Misleading content, Unrealistic outcome"></label>
+          <label class="field">What was running<textarea id="b-running" rows="3" placeholder="Offer, campaign type, which creatives, what you launched just before"></textarea></label>
+          <label class="field">What I’ll do differently<textarea id="b-lesson" rows="2" placeholder="The one change you’ll make next time"></textarea></label>
+          <div><button class="btn primary" id="b-save">Save to ban log</button></div>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>What your banned ads have in common</h2>
+        ${!T ? `<p class="note">Import your creative log with a few ads in it to see this.</p>` : `
+          <p class="note">${int(T.banned)} of ${int(T.total)} ads in your creative log ended banned or disapproved (${pct(T.base)}). ${T.others < 3 ? 'Almost nothing stayed up, so there’s little to compare against — what the banned ads share is the lesson.' : `Compared against ${plural(T.others, 'ad')} that stayed up.`}</p>
+          ${T.topWords.length ? `<h3 class="h3">Words in their hooks and captions</h3>
+            <div class="chips">${T.topWords.map((e) => `<span class="chip" title="In ${e.b} banned ads and ${e.o} that stayed up">${esc(e.w)} <b>${e.b}</b>${T.others ? `<i>/${e.o}</i>` : ''}</span>`).join('')}</div>
+            <p class="small" style="margin:6px 0 14px">Number = banned ads using it${T.others ? ' / ads that stayed up using it' : ''}.</p>` : ''}
+          ${T.traits.length ? `<h3 class="h3">Choices with the highest ban rate</h3>
+            <ul class="insights">${T.traits.map((t) => `<li class="bad"><div><b>${esc(t.label)}: ${esc(t.val)}</b> — ${int(t.b)} of ${int(t.n)} banned (${pct(t.rate)})</div></li>`).join('')}</ul>` : ''}
+          ${T.notes.length ? `<h3 class="h3">What you noted on banned ads</h3>
+            <ul class="insights">${T.notes.slice(0, 8).map((n) => `<li><div><b>${esc(n.date)}</b> ${esc(n.notes).replace(/\n/g, ' · ')}</div></li>`).join('')}</ul>` : ''}`}
+      </section>
+    </div>
+    ${reasons.size ? `<section class="panel" style="margin-top:16px"><h2>Reasons so far</h2><p class="note">How often each reason has come up.</p>
+      <div class="bars">${[...reasons].sort((a, b) => b[1].length - a[1].length).map(([r, l]) => `<div class="b"><div>${esc(l[0].reason)}</div><div class="t"><i style="width:${(100 * l.length / state.bans.length).toFixed(1)}%"></i></div><div class="v">${int(l.length)}</div></div>`).join('')}</div></section>` : ''}
+    <section style="margin-top:16px">
+      <div class="toolbar" style="justify-content:space-between"><div><h2>History</h2><p class="note" style="margin:0">Newest first.</p></div>${bans.length ? '<button class="btn" id="b-dl">Download CSV</button>' : ''}</div>
+      ${bans.length ? `<div class="tbl-wrap"><table>
+        <thead><tr><th>Date</th><th>What got hit</th><th class="hide-sm">Ad account</th><th class="hide-sm">BC</th><th>Reason</th><th class="hide-sm">What was running</th><th>Lesson</th><th></th></tr></thead>
+        <tbody>${bans.map((b) => `<tr><td>${esc(b.date)}</td><td>${esc(b.kind)}</td><td class="hide-sm">${esc(b.account || b.acct)}</td><td class="hide-sm">${esc(b.bc)}</td><td>${esc(b.reason) || '<span class="muted">—</span>'}</td><td class="hide-sm">${esc(b.running).replace(/\n/g, '<br>')}</td><td>${esc(b.lesson).replace(/\n/g, '<br>') || '<span class="muted">—</span>'}</td><td><button class="btn danger" data-del="${b.id}" aria-label="Delete this entry">Delete</button></td></tr>`).join('')}</tbody>
+      </table></div>` : `<div class="panel empty"><p class="note" style="margin:0">Nothing logged yet. Your first entry goes in the form above.</p></div>`}
+    </section>`;
+  bindPick(el);
+  $('#paste-go').addEventListener('click', () => {
+    const text = $('#paste').value.trim();
+    if (!text) { toast('Paste the table first.'); return; }
+    const r = importText(text, 'Pasted table', importMode);
+    if (!r.ok && !/\t/.test(text.split('\n')[0])) r.msg += ' If the paste came out as one cell per line, paste it into Google Sheets first, then copy it from there.';
+    save(); lastLog = [r]; toast(r.ok ? 'Imported.' : 'Couldn’t import that paste.'); render();
+  });
+  $('#b-save').addEventListener('click', () => {
+    const b = { id: hash(Date.now() + Math.random() + ''), date: $('#b-date').value, kind: $('#b-kind').value, account: $('#b-acct').value.trim(), bc: $('#b-bc').value.trim(), reason: $('#b-reason').value.trim(), running: $('#b-running').value.trim(), lesson: $('#b-lesson').value.trim() };
+    if (!b.reason && !b.running) { toast('Add the reason or what was running — otherwise there’s nothing to learn from later.'); return; }
+    state.bans.push(b); save(); toast('Saved to ban log.'); render();
+  });
+  el.querySelectorAll('[data-del]').forEach((btn) => btn.addEventListener('click', () => {
+    if (!confirm('Delete this entry?')) return;
+    state.bans = state.bans.filter((b) => b.id !== btn.dataset.del); save(); render();
+  }));
+  const dl = $('#b-dl');
+  if (dl) dl.addEventListener('click', () => download('ban-log.csv', toCSV([['Date', 'What got hit', 'Ad account', 'BC', 'Reason', 'What was running', 'Lesson'], ...bans.map((b) => [b.date, b.kind, b.account || b.acct, b.bc, b.reason, b.running, b.lesson])]), 'text/csv'));
+}
+
+/* ---- Spend ---- */
+function renderSpend() {
+  const el = $('#view');
+  if (!state.spend.length) { el.innerHTML = `<h1>Spend</h1>${emptyState('No spend log yet', 'Import your spend log CSV to see where your money goes.')}`; bindPick(el); return; }
+  const total = state.spend.reduce((s, x) => s + (x.amount || 0), 0);
+  const adSpend = state.ads.reduce((s, a) => s + (a.spend || 0), 0);
+  const bars = (m) => { const arr = [...m].map(([k, l]) => [k, l.reduce((s, x) => s + (x.amount || 0), 0), l.length]).sort((a, b) => b[1] - a[1]); const max = Math.max(...arr.map((x) => x[1]), 0.01);
+    return `<div class="bars">${arr.map(([k, v, n]) => `<div class="b"><div>${esc(k)} <span class="small">×${n}</span></div><div class="t"><i style="width:${(100 * v / max).toFixed(1)}%"></i></div><div class="v">${usd(v)}</div></div>`).join('')}</div>`; };
+  const byWhat = groupBy(state.spend, (x) => (x.what || 'Other').trim().replace(/\s+/g, ' '));
+  const byCard = groupBy(state.spend, (x) => x.card || 'Not logged');
+  const list = [...state.spend].sort((a, b) => dateKey(b.date) - dateKey(a.date));
+  el.innerHTML = `
+    <h1>Spend</h1>
+    <p class="lede">${usd(total)} out across ${plural(state.spend.length, 'charge')}${state.ads.length ? `. ${usd(adSpend)} of it shows up as ad spend on your ads (${pct(total ? adSpend / total : null)}).` : '.'}</p>
+    <div class="grid2">
+      <section class="panel"><h2>By what it was for</h2><p class="note">From the What column.</p>${bars(byWhat)}</section>
+      <section class="panel"><h2>By card</h2><p class="note">From the Card column.</p>${bars(byCard)}</section>
+    </div>
+    <section style="margin-top:16px"><h2>Every charge</h2><p class="note">Most recent first.</p>
+      <div class="tbl-wrap"><table><thead><tr><th>Date</th><th>What</th><th>Card</th><th class="r">Amount</th><th class="hide-sm">Notes</th></tr></thead>
+      <tbody>${list.map((x) => `<tr><td>${esc(x.date)}</td><td>${esc(x.what)}</td><td>${esc(x.card)}</td><td class="r">${usd(x.amount)}</td><td class="hide-sm">${esc(x.notes)}</td></tr>`).join('')}</tbody></table></div>
+    </section>`;
+}
+
+/* ---- Import & data ---- */
+function renderData() {
+  const el = $('#view'), R = state.rules;
+  el.innerHTML = `
+    <h1>Import &amp; data</h1>
+    <p class="lede">Bring in any sheet with the same kind of layout. The app reads the header row to work out whether a file is your creative log or your spend log and which column is which, so the column order doesn’t matter.</p>
+    <div class="grid2">
+      <section class="panel">
+        <h2>Import CSV files</h2>
+        <p class="note">You can drop several at once, or drop them anywhere in the app.</p>
+        <div class="toolbar"><div class="seg" role="group" aria-label="Import mode">
+          <button data-mode="merge" aria-pressed="${importMode === 'merge'}">Add to what’s here</button>
+          <button data-mode="replace" aria-pressed="${importMode === 'replace'}">Replace</button>
+        </div></div>
+        <div class="drop" data-pick tabindex="0" role="button"><strong>Drop CSVs here</strong>or click to choose files</div>
+        <p class="note" style="margin-top:12px">${importMode === 'merge' ? 'Ads already here are updated if the same ad is imported again (same date, link and hook), so re-importing a sheet won’t double count.' : 'Each file replaces everything of its kind: a creative log replaces all ads, a spend log replaces all charges.'}</p>
+        ${lastLog.length ? `<ul class="log">${lastLog.map((r) => `<li><span>${esc(r.name)}</span><span class="${r.ok ? 'ok' : 'err'}">${esc(r.msg)}</span></li>`).join('')}</ul>` : ''}
+      </section>
+      <section class="panel">
+        <h2>Getting the CSV out of Google Sheets</h2>
+        <ol class="steps">
+          <li>Open the tab you want (for example your creative log).</li>
+          <li>File › Download › Comma-separated values (.csv).</li>
+          <li>Repeat for your spend log tab.</li>
+          <li>Drop both files here.</li>
+        </ol>
+        <p class="note" style="margin-top:12px">Headers it looks for: Date, Ad / Spark link, Hook Text, Hook Style, Status, Spend, Conversions, Revenue, Parent Creative ID, What Changed, Format, Offer, Campaign Style, Notes. For the spend log: Date, Card, What, Amount. For ban history: Date, Ad account, BC, Reason, What was running, Lesson. For a list of names: Ad account and/or BC.</p>
+      </section>
+    </div>
+
+    <section class="panel" style="margin-top:16px">
+      <h2>Keep a sheet synced</h2>
+      <p class="note">Skip the download step: in Google Sheets go to File › Share › Publish to web, pick the tab, choose Comma-separated values, publish, and paste the link here. Anyone with that link can see the tab, so only do this if you’re fine with that.</p>
+      <div class="toolbar">
+        <input type="url" id="sync-url" placeholder="https://docs.google.com/spreadsheets/d/e/…/pub?output=csv" style="flex:2 1 280px" aria-label="Published CSV link">
+        <input type="text" id="sync-label" placeholder="Name, e.g. Main creative log" style="flex:1 1 160px" aria-label="Name">
+        <button class="btn" id="sync-add">Add link</button>
+        <button class="btn primary" id="sync-run" ${state.syncs.length ? '' : 'disabled'}>Sync now</button>
+      </div>
+      ${state.syncs.length ? `<ul class="log">${state.syncs.map((s, i) => `<li><span>${esc(s.label || s.url)}<br><span class="small">${s.last ? (s.ok ? 'Synced ' : 'Failed ') + new Date(s.last).toLocaleString() + (s.msg ? ' — ' + esc(s.msg) : '') : 'Not synced yet'}</span></span><button class="btn danger" data-unsync="${i}">Remove</button></li>`).join('')}</ul>` : ''}
+    </section>
+
+    <section class="panel" style="margin-top:16px">
+      <h2>Verdict rules</h2>
+      <p class="note">How each ad gets called Winner, Watch, Kill or Too early. ROAS = revenue ÷ spend.</p>
+      <div class="rules">
+        <label>Judge after spending ($)<input type="number" min="0" step="1" data-rule="minSpend" value="${R.minSpend}"></label>
+        <label>Winner at ROAS of<input type="number" min="0" step="0.05" data-rule="winRoas" value="${R.winRoas}"></label>
+        <label>Watch at ROAS of<input type="number" min="0" step="0.05" data-rule="watchRoas" value="${R.watchRoas}"></label>
+        <label>Trust a pattern after (ads)<input type="number" min="1" step="1" data-rule="minGroup" value="${R.minGroup}"></label>
+      </div>
+    </section>
+
+    <section class="panel" style="margin-top:16px">
+      <h2>Your data</h2>
+      <p class="note">${plural(state.ads.length, 'ad')}, ${plural(state.spend.length, 'charge')} and ${plural(state.bans.length, 'ban log entry', 'ban log entries')}, saved in this browser only. Download a backup to move it to another computer or keep it safe.</p>
+      <div class="toolbar">
+        <button class="btn" id="bk">Download backup</button>
+        <button class="btn" id="rs">Restore backup</button>
+        <button class="btn danger" id="clr">Delete all data</button>
+      </div>
+      ${state.imports.length ? `<ul class="log">${state.imports.slice(0, 8).map((i) => `<li><span>${esc(i.name)}</span><span class="small">${plural(i.rows, i.type === 'ads' ? 'ad' : 'charge')} · ${new Date(i.at).toLocaleString()}</span></li>`).join('')}</ul>` : ''}
+      <input type="file" id="rs-file" accept=".json,application/json" hidden>
+    </section>`;
+  bindPick(el);
+  el.querySelectorAll('[data-mode]').forEach((b) => b.addEventListener('click', () => { importMode = b.dataset.mode; renderData(); }));
+  el.querySelectorAll('[data-rule]').forEach((inp) => inp.addEventListener('change', () => {
+    const v = Number(inp.value); if (Number.isFinite(v) && v >= 0) { state.rules[inp.dataset.rule] = v; save(); toast('Rules saved.'); }
+  }));
+  $('#sync-add').addEventListener('click', () => {
+    const url = $('#sync-url').value.trim();
+    if (!/^https:\/\/docs\.google\.com\/spreadsheets\/.+(output=csv|format=csv)/.test(url)) { toast('Paste the “Publish to web” link with CSV selected — it ends in output=csv.'); return; }
+    state.syncs.push({ url, label: $('#sync-label').value.trim() }); save(); renderData();
+  });
+  $('#sync-run').addEventListener('click', syncAll);
+  el.querySelectorAll('[data-unsync]').forEach((b) => b.addEventListener('click', () => { state.syncs.splice(+b.dataset.unsync, 1); save(); renderData(); }));
+  $('#bk').addEventListener('click', () => download(`ad-lab-backup-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(state), 'application/json'));
+  $('#rs').addEventListener('click', () => $('#rs-file').click());
+  $('#rs-file').addEventListener('change', async (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    try { const s = JSON.parse(await f.text()); if (!Array.isArray(s.ads)) throw 0; state = { ...blank(), ...s, rules: { ...DEFAULT_RULES, ...(s.rules || {}) } }; save(); toast('Backup restored.'); render(); }
+    catch { toast('That file isn’t an Ad Lab backup.'); }
+  });
+  $('#clr').addEventListener('click', () => {
+    if (confirm('Delete every ad, charge, ban log entry and linked sheet saved in this browser? Download a backup first if you might want it back.')) { const rules = state.rules; state = blank(); state.rules = rules; save(); lastLog = []; render(); toast('All data deleted.'); }
+  });
+}
+
+/* ============ Files ============ */
+function download(name, text, type) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], { type }));
+  a.download = name; document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+const picker = $('#file');
+picker.addEventListener('change', () => { if (picker.files.length) importFiles([...picker.files]); picker.value = ''; });
+function bindPick(root) {
+  root.querySelectorAll('[data-pick]').forEach((d) => {
+    d.addEventListener('click', () => picker.click());
+    d.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); picker.click(); } });
+    d.addEventListener('dragover', (e) => { e.preventDefault(); d.classList.add('over'); });
+    d.addEventListener('dragleave', () => d.classList.remove('over'));
+  });
+}
+let dragDepth = 0;
+const veil = $('#veil');
+window.addEventListener('dragenter', (e) => { if ([...(e.dataTransfer?.types || [])].includes('Files')) { dragDepth++; veil.classList.add('on'); } });
+window.addEventListener('dragleave', () => { dragDepth = Math.max(0, dragDepth - 1); if (!dragDepth) veil.classList.remove('on'); });
+window.addEventListener('dragover', (e) => e.preventDefault());
+window.addEventListener('drop', (e) => {
+  e.preventDefault(); dragDepth = 0; veil.classList.remove('on');
+  const files = [...(e.dataTransfer?.files || [])]; if (files.length) importFiles(files);
+});
+
+if (!canSave) $('#saved-note').textContent = 'This preview can’t save. Download the file and open it in your browser to keep your data.';
+render();
+if (state.syncs.length) syncAll();
+</script>
+</body>
+</html>
