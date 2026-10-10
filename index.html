@@ -170,6 +170,13 @@ table.mini td{padding:6px 10px}
 .entry-fields{margin:8px 0 0;display:grid;gap:12px}
 .entry-fields dt{font-size:12px;color:var(--ink-3);margin-bottom:2px}
 .entry-fields dd{margin:0;max-width:75ch;line-height:1.55}
+.checks{border:1px solid var(--line);border-radius:var(--radius-sm);padding:10px 12px 12px;margin:0;display:flex;flex-wrap:wrap;gap:8px 16px}
+.checks legend{font-size:13px;color:var(--ink-2);padding:0 4px}
+.checks label{display:flex;align-items:center;gap:6px;font-size:14px;cursor:pointer}
+.checks input{width:16px;height:16px;accent-color:var(--blue)}
+.adform .h3:first-of-type{margin-top:6px}
+.adform .rules input,.adform .rules select{width:100%}
+.danger-link{color:var(--kill)}
 .sum-head{display:flex;flex-wrap:wrap;gap:16px;justify-content:space-between;align-items:flex-end}
 .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,10.5rem),1fr));gap:12px;margin-bottom:16px}
 .kpi{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px}
@@ -244,7 +251,7 @@ svg.trend .v{fill:var(--ink);font-weight:600}
 /* ============ Storage ============ */
 const STORE = 'adlab.v1';
 const DEFAULT_RULES = { minSpend: 10, winRoas: 1.3, watchRoas: 0.8, minGroup: 10 };
-function blank() { return { ads: [], spend: [], bans: [], journal: [], names: { accounts: [], bcs: [] }, ignored: [], imports: [], syncs: [], rules: { ...DEFAULT_RULES } }; }
+function blank() { return { ads: [], spend: [], bans: [], journal: [], creatives: [], names: { accounts: [], bcs: [] }, ignored: [], imports: [], syncs: [], rules: { ...DEFAULT_RULES } }; }
 function load() {
   try {
     const s = JSON.parse(localStorage.getItem(STORE));
@@ -385,6 +392,7 @@ function findCols(header, map) {
 function detect(header) {
   const h = header.map(norm), has = (re) => h.some((x) => re.test(x));
   if (has(/^what i tested/) || has(/^plan for tomorrow/) || has(/^patterns i.?m noticing/)) return 'journal';
+  if (has(/^creative id/) && (has(/^hook/) || has(/^creative link/)) && !has(/^status/)) return 'creatives';
   const named = has(/^(advertiser|ad account|account|bc\b|business cent)/);
   if (named && (has(/^(reason|violation|lesson)/) || has(/^(date banned|banned on|ban date)/))) return 'bans';
   if (has(/(amount|charged)/) && !has(/^status/) && !has(/^hook/)) return 'spend';
@@ -472,6 +480,39 @@ function rowsToJournal(header, body, source) {
   });
   return out;
 }
+const CREATIVE_COLS = {
+  creative_id: /^creative id/, ad: /^creative link/, date: /^(date created|date)/, offer: /^offer$/, offer_type: /^offer type/,
+  parent: /^parent/, changed: /^what changed/, stayed: /^what stayed/, format: /^format/, slides: /^# ?slides/,
+  hook: /^hook( text)?$/, hook_style: /^hook style/, visual: /^visual/, sound: /^sound/, caption: /^caption/, notes: /^notes/,
+};
+function rowsToCreatives(header, body, source) {
+  const ix = findCols(header, CREATIVE_COLS), out = [];
+  body.forEach((r) => {
+    const c = {};
+    for (const k of Object.keys(CREATIVE_COLS)) c[k] = cell(r, ix[k]);
+    if (!c.creative_id && !c.hook) return;
+    c.id = 'c' + (c.creative_id || hash(c.hook + c.ad));
+    c.source = source;
+    out.push(c);
+  });
+  return out;
+}
+// Runs rows carry a Creative ID; fill any blank detail on the ad from its creative
+const ENRICH_FIELDS = ['hook', 'hook_style', 'offer', 'offer_type', 'parent', 'changed', 'format', 'visual', 'sound', 'caption'];
+function enrichAds() {
+  const lib = new Map((state.creatives || []).filter((c) => c.creative_id).map((c) => [c.creative_id.trim().toLowerCase(), c]));
+  let n = 0;
+  if (!lib.size) return 0;
+  state.ads.forEach((a) => {
+    const c = a.creative_id && lib.get(String(a.creative_id).trim().toLowerCase());
+    if (!c) return;
+    let hit = false;
+    ENRICH_FIELDS.forEach((f) => { if (!a[f] && c[f]) { a[f] = c[f]; hit = true; } });
+    if (!a.ad && c.ad) { a.ad = c.ad; hit = true; }
+    if (hit) n++;
+  });
+  return n;
+}
 function rowsToNames(header, body) {
   const ix = findCols(header, NAME_COLS), accounts = new Set(), bcs = new Set();
   body.forEach((r) => {
@@ -500,7 +541,19 @@ function merge(kind, incoming, mode) {
 function importText(text, name, mode) {
   const rows = parseCSV(text);
   const t = readTable(rows);
-  if (!t) return { name, ok: false, msg: 'Couldn’t tell what this is. Row 1 needs headers like Status, Spend and Hook Text (ads), Amount and What (spend), Ad account and Reason (ban history) or Ad account / BC (names).' };
+  if (!t) {
+    const found = (rows[0] || []).map((x) => String(x || '').split(/\r?\n/)[0].trim()).filter(Boolean).slice(0, 8);
+    return { name, ok: false, msg: `Couldn’t tell what this is.${found.length ? ` Its first row has: ${found.join(', ')}.` : ' The file looks empty.'} The app reads creative logs (Status, Spend, Hook Text), Creatives and Runs tabs, spend logs (What, Amount), journals, ban history and account lists.` };
+  }
+  if (t.type === 'creatives') {
+    const items = rowsToCreatives(t.header, t.body, name);
+    if (!items.length) return { name, ok: true, kind: 'creatives', msg: 'Your Creatives tab has no rows yet — nothing to bring in.' };
+    const r = merge('creatives', items, importMode);
+    state.imports.unshift({ name, type: 'creatives', rows: items.length, at: new Date().toISOString() });
+    const filled = enrichAds();
+    const runs = state.ads.some((a) => a.creative_id);
+    return { name, ok: true, kind: 'creatives', msg: `${plural(items.length, 'creative')} saved to your library (${int(r.added)} new)${filled ? `, details filled in on ${plural(filled, 'ad')}` : ''}.${runs ? '' : ' Now import your Runs tab — that’s where spend and results live.'}` };
+  }
   if (t.type === 'journal') {
     const items = rowsToJournal(t.header, t.body, name);
     if (!items.length) return { name, ok: true, kind: 'journal', msg: 'Your journal tab is empty — nothing to bring in yet. Start writing entries on the Journal tab.' };
@@ -536,10 +589,12 @@ function importText(text, name, mode) {
   if (!items.length) return { name, ok: false, msg: 'Found the headers but no rows under them.' };
   const kind = t.type === 'ads' ? 'ads' : 'spend';
   const r = merge(kind, items, mode);
+  const filled = kind === 'ads' ? enrichAds() : 0;
+  const needLib = kind === 'ads' && items.some((a) => a.creative_id && !a.hook) && !(state.creatives || []).length;
   state.imports.unshift({ name, type: kind, rows: items.length, at: new Date().toISOString() });
   state.imports = state.imports.slice(0, 30);
   const label = kind === 'ads' ? 'ad' : 'charge';
-  return { name, ok: true, kind, msg: mode === 'replace' ? `Replaced with ${plural(items.length, label)}` : `${plural(r.added, 'new ' + label, 'new ' + label + 's')}, ${int(r.updated)} updated` };
+  return { name, ok: true, kind, msg: (mode === 'replace' ? `Replaced with ${plural(items.length, label)}` : `${plural(r.added, 'new ' + label, 'new ' + label + 's')}, ${int(r.updated)} updated`) + (filled ? `, hooks and details filled in from your Creatives library` : '') + (needLib ? '. Import your Creatives tab too so these ads get their hooks.' : '') };
 }
 let importMode = 'merge';
 let lastLog = [];
@@ -623,17 +678,20 @@ function render() {
   VIEWS[view]();
 }
 
-function emptyState(title, body) {
+function emptyState(title, body, action) {
+  const btn = action === 'charge' ? '<button class="btn primary" id="new-charge">Add a charge</button>' : action ? '<button class="btn primary" data-new-ad>Log your first ad</button>' : '';
   return `<div class="panel empty"><h2>${esc(title)}</h2><p class="note">${esc(body)}</p>
+    ${btn ? `<div style="margin:4px 0 18px">${btn}</div><p class="small" style="margin:0 0 10px">or import a file</p>` : ''}
     <div class="drop" data-pick tabindex="0" role="button"><strong>Drop your CSVs here</strong>or click to choose files</div></div>`;
 }
+document.addEventListener('click', (e) => { if (e.target.closest('[data-new-ad]')) openAdForm(); });
 
 function renderOverview() {
   const el = $('#view');
   if (!state.ads.length && !state.spend.length) {
     el.innerHTML = `<h1>Your tests, at a glance</h1>
       <p class="lede">Export your creative log and spend log tabs from Google Sheets as CSV and drop them in. Columns are matched by their header names, so any sheet with the same kind of layout works.</p>
-      ${emptyState('No data yet', 'In Google Sheets: open the tab, then File › Download › Comma-separated values (.csv). Do it for each tab and drop all the files here at once.')}`;
+      ${emptyState('No data yet', 'Type in your first ad, or import your sheet: open the tab in Google Sheets, then File › Download › Comma-separated values (.csv).', true)}`;
     bindPick(el); return;
   }
   const A = agg(state.ads);
@@ -744,7 +802,7 @@ function delta(cur, prev, goodUp, fmt) {
 function renderSummary() {
   const el = $('#view');
   if (!state.ads.length) {
-    el.innerHTML = `<h1>Summary</h1><p class="lede">One page with everything that matters: your numbers, the keywords and choices that work, and what your ban log is telling you.</p>${emptyState('No data yet', 'Import your creative log (and spend log, if you have one) to fill this in.')}`;
+    el.innerHTML = `<h1>Summary</h1><p class="lede">One page with everything that matters: your numbers, the keywords and choices that work, and what your ban log is telling you.</p>${emptyState('No data yet', 'Log your first ad, or import your creative log (and spend log) to fill this in.', true)}`;
     bindPick(el); return;
   }
   const days = [...new Set(state.ads.map((a) => a.date).filter(Boolean))].sort((a, b) => dateKey(b) - dateKey(a));
@@ -869,16 +927,108 @@ function trendChart(days) {
 }
 
 /* ---- Ads ---- */
+const CHANGE_OPTS = ['Hook text', 'Hair', 'Clothing', 'Face/person', 'Background', 'Sound', 'Caption', 'Slide order', 'Repost (new Spark code)'];
+const STATUS_OPTS = ['Live', 'Approved', 'Paused', 'Disapproved', 'Appealed', 'Account banned'];
+const HOOK_STYLES = ['Question', 'Story', 'Shock', 'Problem', 'Curiosity', 'Other'];
+const FORMATS = ['Video', 'Slides'];
+const OFFER_TYPES = ['CPI', 'Sweepstakes', 'Lead gen', 'Other'];
+const CAMPAIGNS = ['Traffic', 'Lead Gen', 'Sales / Conversions', 'Smart+', 'App Promotion', 'Reach', 'Video Views', 'Community Interaction'];
+const distinct = (field, base = []) => [...new Set([...base, ...state.ads.map((a) => String(a[field] || '').trim()).filter(Boolean)])];
+const mdFromISO = (iso) => { const m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})$/); return m ? `${+m[2]}/${+m[3]}` : String(iso || ''); };
+const adForm = { open: false, id: null, from: null };
+function openAdForm(opts = {}) { adForm.open = true; adForm.id = opts.id || null; adForm.from = opts.from || null; go('ads'); const f = $('#ad-form'); if (f && f.scrollIntoView) f.scrollIntoView({ block: 'start' }); const h = $('#af-hook'); if (h) h.focus({ preventScroll: true }); }
+function adFormHTML() {
+  const editing = adForm.id ? state.ads.find((x) => x.id === adForm.id) : null;
+  const a = editing || adForm.from || {};
+  const v = (k) => esc(a[k] ?? '');
+  const n = (k) => (a[k] == null ? '' : a[k]);
+  const changed = new Set(String(a.changed || '').split(/\s*,\s*/).filter(Boolean));
+  const dl = (id, arr) => `<datalist id="${id}">${arr.map((x) => `<option value="${esc(x)}">`).join('')}</datalist>`;
+  const parents = new Map(); state.ads.forEach((x) => { if (x.ad && !parents.has(x.ad)) parents.set(x.ad, x.hook); });
+  const statuses = [...new Set([...STATUS_OPTS, ...distinct('status')])];
+  const title = editing ? 'Edit ad' : adForm.from && adForm.from.parent ? 'New variation' : 'Log an ad';
+  return `<section class="panel adform" id="ad-form">
+    <div class="toolbar" style="justify-content:space-between;margin-bottom:4px"><h2 style="margin:0">${title}</h2><button class="btn" id="af-cancel">Cancel</button></div>
+    <p class="note">${editing ? 'Update the results as they come in. Only the hook or the link is required.' : adForm.from && adForm.from.parent ? 'Copied from the parent ad — change what’s different and tick what changed.' : 'Only the hook or the link is required. Fill in results now or come back with Edit later.'}</p>
+    <h3 class="h3">The creative</h3>
+    <div class="stack" style="gap:10px">
+      <label class="field">Hook text<textarea id="af-hook" rows="2" placeholder="The words on screen in the first seconds">${v('hook')}</textarea></label>
+      <div class="rules">
+        <label>Date launched<input type="date" id="af-date" value="${esc(isoFrom(a.date) || todayISO())}"></label>
+        <label>Hook style<input type="text" id="af-hook_style" list="dl-hs" value="${v('hook_style')}" autocomplete="off"></label>
+        <label>Format<input type="text" id="af-format" list="dl-fmt" value="${v('format')}" autocomplete="off"></label>
+        <label>Offer<input type="text" id="af-offer" list="dl-offer" value="${v('offer')}" autocomplete="off"></label>
+        <label>Offer type<input type="text" id="af-offer_type" list="dl-ot" value="${v('offer_type')}" autocomplete="off"></label>
+      </div>
+      <label class="field">Ad / Spark link<input type="url" id="af-ad" value="${v('ad')}" placeholder="https://www.tiktok.com/@…/video/…"></label>
+      <label class="field">Parent creative (blank if original)<input type="text" id="af-parent" list="dl-parent" value="${v('parent')}" placeholder="Pick the ad this is a variation of" autocomplete="off"></label>
+      <fieldset class="checks"><legend>What changed from the parent</legend>${CHANGE_OPTS.map((c) => `<label><input type="checkbox" name="af-changed" value="${esc(c)}" ${changed.has(c) ? 'checked' : ''}>${esc(c)}</label>`).join('')}</fieldset>
+      <label class="field">Visual (person, hair, outfit, setting)<textarea id="af-visual" rows="2">${v('visual')}</textarea></label>
+      <div class="rules">
+        <label>Sound<input type="text" id="af-sound" value="${v('sound')}"></label>
+        <label>Caption<input type="text" id="af-caption" value="${v('caption')}"></label>
+      </div>
+    </div>
+    <h3 class="h3">Launch</h3>
+    <div class="rules">
+      <label>Campaign style / bid<input type="text" id="af-campaign" list="dl-camp" value="${v('campaign')}" autocomplete="off"></label>
+      <label>Account / BC<input type="text" id="af-account" list="dl-acc" value="${v('account')}" autocomplete="off"></label>
+      <label>Launch hour (0–23)<input type="number" id="af-launch_hour" min="0" max="23" step="1" value="${v('launch_hour')}"></label>
+    </div>
+    <h3 class="h3">Results</h3>
+    <div class="rules">
+      <label>Status<select id="af-status"><option value="">Not set</option>${statuses.map((s) => `<option ${a.status === s ? 'selected' : ''}>${esc(s)}</option>`).join('')}</select></label>
+      <label>Spend ($)<input type="number" id="af-spend" min="0" step="0.01" inputmode="decimal" value="${n('spend')}"></label>
+      <label>Conversions (postbacks)<input type="number" id="af-conversions" min="0" step="1" inputmode="numeric" value="${n('conversions')}"></label>
+      <label>Revenue ($)<input type="number" id="af-revenue" min="0" step="0.01" inputmode="decimal" value="${n('revenue')}"></label>
+    </div>
+    <label class="field" style="margin-top:10px">Notes<textarea id="af-notes" rows="2">${v('notes')}</textarea></label>
+    <div class="toolbar" style="margin:14px 0 0"><button class="btn primary" id="af-save">${editing ? 'Save changes' : 'Save ad'}</button><span class="small">Ctrl/⌘ + Enter saves</span></div>
+    ${dl('dl-hs', distinct('hook_style', HOOK_STYLES))}${dl('dl-fmt', distinct('format', FORMATS))}${dl('dl-offer', distinct('offer'))}${dl('dl-ot', distinct('offer_type', OFFER_TYPES))}
+    ${dl('dl-camp', distinct('campaign', CAMPAIGNS))}${dl('dl-acc', knownNames().accounts)}
+    <datalist id="dl-parent">${[...parents].map(([link, hook]) => `<option value="${esc(link)}" label="${esc(String(hook || '').slice(0, 60))}">`).join('')}</datalist>
+  </section>`;
+}
+function bindAdForm() {
+  if (!$('#ad-form')) return;
+  $('#af-cancel').addEventListener('click', () => { adForm.open = false; adForm.id = null; adForm.from = null; renderAds(); });
+  const saveAd = () => {
+    const g = (k) => { const el = $('#af-' + k); return el ? el.value.trim() : ''; };
+    const existing = adForm.id ? state.ads.find((x) => x.id === adForm.id) : null;
+    const rec = {
+      ...(existing || {}),
+      id: existing ? existing.id : 'm' + hash(Date.now() + '' + Math.random()),
+      date: mdFromISO(g('date')), ad: g('ad'), offer: g('offer'), offer_type: g('offer_type'), parent: g('parent'),
+      changed: [...document.querySelectorAll('[name="af-changed"]:checked')].map((c) => c.value).join(', '),
+      format: g('format'), hook: g('hook'), hook_style: g('hook_style'), visual: g('visual'), sound: g('sound'), caption: g('caption'),
+      campaign: g('campaign'), account: g('account'), launch_hour: g('launch_hour'), status: g('status'),
+      spend: money(g('spend')), conversions: count(g('conversions')), revenue: money(g('revenue')), notes: g('notes'),
+      source: existing ? existing.source : 'Typed in',
+    };
+    if (!rec.hook && !rec.ad) { toast('Add the hook or the ad link so you can tell this ad apart later.'); $('#af-hook').focus(); return; }
+    if (existing) state.ads = state.ads.map((x) => (x.id === existing.id ? rec : x)); else state.ads.push(rec);
+    adForm.open = false; adForm.id = null; adForm.from = null; adsFilter.open = rec.id;
+    save(); toast(existing ? 'Ad updated.' : 'Ad saved.'); render();
+  };
+  $('#af-save').addEventListener('click', saveAd);
+  $('#ad-form').addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); saveAd(); } });
+}
 const adsFilter = { q: '', verdict: '', status: '', date: '', sort: 'date', dir: -1, open: null };
 function renderAds() {
   const el = $('#view');
-  if (!state.ads.length) { el.innerHTML = `<h1>Ads</h1>${emptyState('No ads yet', 'Import your creative log CSV to see every ad here.')}`; bindPick(el); return; }
+  if (!state.ads.length && !adForm.open) {
+    el.innerHTML = `<h1>Ads</h1>${emptyState('No ads yet', 'Log your first ad by typing it in, or import your creative log CSV.', true)}`;
+    bindPick(el); return;
+  }
   const statuses = [...new Set(state.ads.map((a) => a.status || 'No status'))].sort();
   const dates = [...new Set(state.ads.map((a) => a.date).filter(Boolean))].sort((a, b) => dateKey(b) - dateKey(a));
   el.innerHTML = `
-    <h1>Ads</h1>
-    <p class="lede">Every ad you’ve logged. Click a row for its full details.</p>
-    <div class="toolbar">
+    <div class="sum-head"><div><h1>Ads</h1><p class="lede" style="margin-bottom:0">Every ad you’ve logged. Click a row to see its details, edit it, or make a variation.</p></div>
+      ${adForm.open ? '' : '<button class="btn primary" id="new-ad">Log an ad</button>'}</div>
+    <div style="height:20px"></div>
+    ${adForm.open ? adFormHTML() : ''}
+    ${state.ads.length ? `
+    <div class="toolbar" style="${adForm.open ? 'margin-top:20px' : ''}">
       <input type="search" id="q" placeholder="Search hooks, captions, sounds, notes…" aria-label="Search ads" value="${esc(adsFilter.q)}">
       <select id="fv" aria-label="Verdict"><option value="">All verdicts</option>${['Winner', 'Watch', 'Too early', 'Kill', 'Disapproved', 'Banned'].map((v) => `<option ${adsFilter.verdict === v ? 'selected' : ''}>${v}</option>`).join('')}</select>
       <select id="fs" aria-label="Status"><option value="">All statuses</option>${statuses.map((s) => `<option ${adsFilter.status === s ? 'selected' : ''}>${esc(s)}</option>`).join('')}</select>
@@ -897,7 +1047,10 @@ function renderAds() {
         <th data-k="cpa" class="r"><button>CPA</button></th>
         <th data-k="revenue" class="r hide-sm"><button>Revenue</button></th>
         <th data-k="roas" class="r hide-sm"><button>ROAS</button></th>
-      </tr></thead><tbody></tbody></table></div>`;
+      </tr></thead><tbody></tbody></table></div>` : ''}`;
+  bindAdForm();
+  const nb = $('#new-ad'); if (nb) nb.addEventListener('click', () => openAdForm());
+  if (!state.ads.length) return;
   const draw = () => {
     const q = adsFilter.q.toLowerCase();
     let rows = state.ads.filter((a) =>
@@ -908,7 +1061,7 @@ function renderAds() {
     const val = (a) => {
       switch (adsFilter.sort) {
         case 'date': return dateKey(a.date);
-        case 'cpa': return a.conversions ? a.spend / a.conversions : null;
+        case 'cpa': return a.conversions ? (a.spend || 0) / a.conversions : null;
         case 'roas': return a.spend ? (a.revenue || 0) / a.spend : null;
         case 'verdict': return verdict(a).t;
         default: return a[adsFilter.sort];
@@ -925,7 +1078,7 @@ function renderAds() {
     const tb = $('#ads-tbl tbody');
     if (!rows.length) { tb.innerHTML = `<tr><td colspan="9" class="empty">No ads match. Clear a filter to see more.</td></tr>`; return; }
     tb.innerHTML = rows.map((a) => {
-      const v = verdict(a), cpa = a.conversions ? a.spend / a.conversions : null, roas = a.spend ? (a.revenue || 0) / a.spend : null;
+      const v = verdict(a), cpa = a.conversions ? (a.spend || 0) / a.conversions : null, roas = a.spend ? (a.revenue || 0) / a.spend : null;
       const open = adsFilter.open === a.id;
       return `<tr class="row" data-id="${a.id}" aria-expanded="${open}">
         <td>${esc(a.date)}</td>
@@ -937,10 +1090,16 @@ function renderAds() {
         <td class="r">${cpa == null ? '<span class="muted">—</span>' : usd(cpa)}</td>
         <td class="r hide-sm">${a.revenue == null ? '<span class="muted">—</span>' : usd(a.revenue)}</td>
         <td class="r hide-sm">${roasFmt(roas)}</td></tr>
-        ${open ? `<tr class="detail"><td colspan="9"><div class="kv">
+        ${open ? `<tr class="detail"><td colspan="9">
+          <div class="toolbar" style="margin-bottom:12px">
+            <button class="btn primary" data-aedit="${a.id}">Edit</button>
+            <button class="btn" data-avar="${a.id}">New variation</button>
+            <button class="btn danger" data-adel="${a.id}">Delete</button>
+          </div>
+          <div class="kv">
           ${[['Link', a.ad ? `<a href="${esc(a.ad)}" target="_blank" rel="noopener">${esc(a.ad)}</a>` : ''], ['Parent creative', a.parent ? `<a href="${esc(a.parent)}" target="_blank" rel="noopener">${esc(shortId(a.parent))}</a>` : 'Original'],
             ['What changed', esc(a.changed)], ['Offer', esc([a.offer, a.offer_type].filter(Boolean).join(' · '))], ['Format', esc(a.format)], ['Hook style', esc(a.hook_style)],
-            ['Visual', esc(a.visual)], ['Sound', esc(a.sound)], ['Caption', esc(a.caption)], ['Campaign / bid', esc(a.campaign)], ['Account / BC', esc(a.account)], ['Notes', esc(a.notes)], ['Imported from', esc(a.source)]]
+            ['Visual', esc(a.visual)], ['Sound', esc(a.sound)], ['Caption', esc(a.caption)], ['Campaign / bid', esc(a.campaign)], ['Account / BC', esc(a.account)], ['Launch hour', esc(a.launch_hour)], ['Notes', esc(a.notes)], ['Added from', esc(a.source)]]
             .filter(([, v]) => v).map(([k, v]) => `<div><span>${k}</span>${v.replace(/\n/g, '<br>')}</div>`).join('')}
         </div></td></tr>` : ''}`;
     }).join('');
@@ -957,12 +1116,24 @@ function renderAds() {
   }));
   $('#ads-tbl tbody').addEventListener('click', (e) => {
     if (e.target.closest('a')) return;
+    const ed = e.target.closest('[data-aedit]'), va = e.target.closest('[data-avar]'), de = e.target.closest('[data-adel]');
+    if (ed) { openAdForm({ id: ed.dataset.aedit }); return; }
+    if (va) {
+      const src = state.ads.find((x) => x.id === va.dataset.avar);
+      const from = { ...src, parent: src.ad || src.parent || '', changed: '', status: '', spend: null, conversions: null, revenue: null, notes: '', ad: '', date: mdFromISO(todayISO()) };
+      delete from.id; openAdForm({ from }); return;
+    }
+    if (de) {
+      if (!confirm('Delete this ad? This can’t be undone (unless you have a backup).')) return;
+      state.ads = state.ads.filter((x) => x.id !== de.dataset.adel); adsFilter.open = null; save(); render(); toast('Ad deleted.'); return;
+    }
     const tr = e.target.closest('tr.row'); if (!tr) return;
     adsFilter.open = adsFilter.open === tr.dataset.id ? null : tr.dataset.id; draw();
   });
   $('#dl').addEventListener('click', () => {
-    const cols = ['date', 'hook', 'status', 'spend', 'conversions', 'revenue', 'offer', 'offer_type', 'parent', 'changed', 'format', 'hook_style', 'visual', 'sound', 'caption', 'campaign', 'account', 'ad', 'notes'];
-    download('ads.csv', toCSV([[...cols, 'verdict'], ...state.ads.map((a) => [...cols.map((c) => a[c]), verdict(a).t])]), 'text/csv');
+    const cols = ['date', 'hook', 'status', 'spend', 'conversions', 'revenue', 'offer', 'offer_type', 'parent', 'changed', 'format', 'hook_style', 'visual', 'sound', 'caption', 'campaign', 'account', 'launch_hour', 'ad', 'notes'];
+    const head = ['Date', 'Hook Text', 'Status', 'Spend ($)', 'Glitchy Conversions', 'Revenue ($)', 'Offer', 'Offer Type', 'Parent Creative ID', 'What Changed', 'Format', 'Hook Style', 'Visual Description', 'Sound', 'Caption', 'Campaign Style / Bid', 'Account / BC', 'Launch Hour', 'Ad / Spark ID', 'Notes'];
+    download('ads.csv', toCSV([[...head, 'Verdict'], ...state.ads.map((a) => [...cols.map((c) => a[c]), verdict(a).t])]), 'text/csv');
   });
 }
 
@@ -1049,7 +1220,7 @@ function dedupeK(list) {
 }
 function renderKeywords() {
   const el = $('#view');
-  if (!state.ads.length) { el.innerHTML = `<h1>Keywords</h1>${emptyState('No ads yet', 'Import your creative log to see which words in your hooks bring conversions.')}`; bindPick(el); return; }
+  if (!state.ads.length) { el.innerHTML = `<h1>Keywords</h1>${emptyState('No ads yet', 'Import your creative log to see which words in your hooks bring conversions.', true)}`; bindPick(el); return; }
   const ads = kwRangeAds();
   const { rows, total, base, useSpend } = keywordStats(ads, kw.mode, kw.src);
   const val = (r) => r[kw.sort];
@@ -1167,7 +1338,7 @@ const DIMS = [
 const pat = { dim: 'parent', sort: 'n', dir: -1 };
 function renderPatterns() {
   const el = $('#view');
-  if (!state.ads.length) { el.innerHTML = `<h1>Patterns</h1>${emptyState('No ads yet', 'Import your creative log to see what your winners have in common.')}`; bindPick(el); return; }
+  if (!state.ads.length) { el.innerHTML = `<h1>Patterns</h1>${emptyState('No ads yet', 'Import your creative log to see what your winners have in common.', true)}`; bindPick(el); return; }
   const dim = DIMS.find((d) => d[0] === pat.dim) || DIMS[0];
   const groups = [...groupBy(state.ads, dim[2])].map(([k, l]) => ({ k, ...agg(l) }));
   const val = (g) => g[pat.sort];
@@ -1379,9 +1550,33 @@ function renderBans() {
 }
 
 /* ---- Spend ---- */
+const SPEND_WHATS = ['Ad account balance', 'BC', 'Residential proxy', 'Sticky proxy', 'Domain', 'Followers'];
+const spendForm = { open: false, id: null };
+function spendFormHTML() {
+  const x = spendForm.id ? state.spend.find((s) => s.id === spendForm.id) : null;
+  const whats = [...new Set([...SPEND_WHATS, ...state.spend.map((s) => (s.what || '').trim()).filter(Boolean)])];
+  const cards = [...new Set(state.spend.map((s) => (s.card || '').trim()).filter(Boolean))];
+  return `<section class="panel" id="spend-form" style="margin-bottom:16px">
+    <div class="toolbar" style="justify-content:space-between;margin-bottom:8px"><h2 style="margin:0">${x ? 'Edit charge' : 'Add a charge'}</h2><button class="btn" id="sf-cancel">Cancel</button></div>
+    <div class="rules">
+      <label>Date<input type="date" id="sf-date" value="${esc(x ? isoFrom(x.date) : todayISO())}"></label>
+      <label>What it was for<input type="text" id="sf-what" list="dl-what" value="${esc(x ? x.what : '')}" autocomplete="off"></label>
+      <label>Card (last 4)<input type="text" id="sf-card" list="dl-card" value="${esc(x ? x.card : '')}" autocomplete="off"></label>
+      <label>Amount ($)<input type="number" id="sf-amount" min="0" step="0.01" inputmode="decimal" value="${x && x.amount != null ? x.amount : ''}"></label>
+    </div>
+    <label class="field" style="margin-top:10px">Notes<input type="text" id="sf-notes" value="${esc(x ? x.notes : '')}"></label>
+    <div class="toolbar" style="margin:14px 0 0"><button class="btn primary" id="sf-save">${x ? 'Save changes' : 'Save charge'}</button></div>
+    <datalist id="dl-what">${whats.map((w) => `<option value="${esc(w)}">`).join('')}</datalist>
+    <datalist id="dl-card">${cards.map((c) => `<option value="${esc(c)}">`).join('')}</datalist>
+  </section>`;
+}
 function renderSpend() {
   const el = $('#view');
-  if (!state.spend.length) { el.innerHTML = `<h1>Spend</h1>${emptyState('No spend log yet', 'Import your spend log CSV to see where your money goes.')}`; bindPick(el); return; }
+  const head = `<div class="sum-head"><div><h1>Spend</h1></div>${spendForm.open ? '' : '<button class="btn primary" id="new-charge">Add a charge</button>'}</div><div style="height:16px"></div>`;
+  if (!state.spend.length && !spendForm.open) {
+    el.innerHTML = `${head}${emptyState('No spend log yet', 'Add your first charge by typing it in, or import your spend log CSV.', 'charge')}`;
+    bindPick(el); bindSpend(); return;
+  }
   const total = state.spend.reduce((s, x) => s + (x.amount || 0), 0);
   const adSpend = state.ads.reduce((s, a) => s + (a.spend || 0), 0);
   const bars = (m) => { const arr = [...m].map(([k, l]) => [k, l.reduce((s, x) => s + (x.amount || 0), 0), l.length]).sort((a, b) => b[1] - a[1]); const max = Math.max(...arr.map((x) => x[1]), 0.01);
@@ -1389,17 +1584,42 @@ function renderSpend() {
   const byWhat = groupBy(state.spend, (x) => (x.what || 'Other').trim().replace(/\s+/g, ' '));
   const byCard = groupBy(state.spend, (x) => x.card || 'Not logged');
   const list = [...state.spend].sort((a, b) => dateKey(b.date) - dateKey(a.date));
-  el.innerHTML = `
-    <h1>Spend</h1>
+  el.innerHTML = `${head}
+    ${spendForm.open ? spendFormHTML() : ''}
+    ${state.spend.length ? `
     <p class="lede">${usd(total)} out across ${plural(state.spend.length, 'charge')}${state.ads.length ? `. ${usd(adSpend)} of it shows up as ad spend on your ads (${pct(total ? adSpend / total : null)}).` : '.'}</p>
     <div class="grid2">
       <section class="panel"><h2>By what it was for</h2><p class="note">From the What column.</p>${bars(byWhat)}</section>
       <section class="panel"><h2>By card</h2><p class="note">From the Card column.</p>${bars(byCard)}</section>
     </div>
     <section style="margin-top:16px"><h2>Every charge</h2><p class="note">Most recent first.</p>
-      <div class="tbl-wrap"><table><thead><tr><th>Date</th><th>What</th><th>Card</th><th class="r">Amount</th><th class="hide-sm">Notes</th></tr></thead>
-      <tbody>${list.map((x) => `<tr><td>${esc(x.date)}</td><td>${esc(x.what)}</td><td>${esc(x.card)}</td><td class="r">${usd(x.amount)}</td><td class="hide-sm">${esc(x.notes)}</td></tr>`).join('')}</tbody></table></div>
-    </section>`;
+      <div class="tbl-wrap"><table id="spend-tbl"><thead><tr><th>Date</th><th>What</th><th>Card</th><th class="r">Amount</th><th class="hide-sm">Notes</th><th></th></tr></thead>
+      <tbody>${list.map((x) => `<tr><td>${esc(x.date)}</td><td>${esc(x.what)}</td><td>${esc(x.card)}</td><td class="r">${usd(x.amount)}</td><td class="hide-sm">${esc(x.notes)}</td>
+        <td class="r" style="white-space:nowrap"><button class="link" data-sedit="${x.id}">Edit</button><button class="link danger-link" data-sdel="${x.id}">Delete</button></td></tr>`).join('')}</tbody></table></div>
+    </section>` : ''}`;
+  bindSpend();
+}
+function bindSpend() {
+  const el = $('#view');
+  const nb = $('#new-charge'); if (nb) nb.addEventListener('click', () => { spendForm.open = true; spendForm.id = null; renderSpend(); const w = $('#sf-what'); if (w) w.focus(); });
+  const c = $('#sf-cancel'); if (c) c.addEventListener('click', () => { spendForm.open = false; spendForm.id = null; renderSpend(); });
+  const s = $('#sf-save');
+  if (s) {
+    const saveCharge = () => {
+      const existing = spendForm.id ? state.spend.find((x) => x.id === spendForm.id) : null;
+      const rec = { ...(existing || {}), id: existing ? existing.id : 's' + hash(Date.now() + '' + Math.random()), date: mdFromISO($('#sf-date').value), what: $('#sf-what').value.trim(), card: $('#sf-card').value.trim(), amount: money($('#sf-amount').value), notes: $('#sf-notes').value.trim(), source: existing ? existing.source : 'Typed in' };
+      if (rec.amount == null) { toast('Add the amount.'); $('#sf-amount').focus(); return; }
+      if (existing) state.spend = state.spend.map((x) => (x.id === existing.id ? rec : x)); else state.spend.push(rec);
+      spendForm.open = false; spendForm.id = null; save(); toast(existing ? 'Charge updated.' : 'Charge saved.'); render();
+    };
+    s.addEventListener('click', saveCharge);
+    $('#spend-form').addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.target.tagName === 'INPUT' || e.metaKey || e.ctrlKey)) { e.preventDefault(); saveCharge(); } });
+  }
+  el.querySelectorAll('[data-sedit]').forEach((b) => b.addEventListener('click', () => { spendForm.open = true; spendForm.id = b.dataset.sedit; renderSpend(); window.scrollTo(0, 0); }));
+  el.querySelectorAll('[data-sdel]').forEach((b) => b.addEventListener('click', () => {
+    if (!confirm('Delete this charge?')) return;
+    state.spend = state.spend.filter((x) => x.id !== b.dataset.sdel); save(); render(); toast('Charge deleted.');
+  }));
 }
 
 /* ---- Import & data ---- */
@@ -1428,7 +1648,7 @@ function renderData() {
           <li>Repeat for your spend log tab.</li>
           <li>Drop both files here.</li>
         </ol>
-        <p class="note" style="margin-top:12px">Headers it looks for: Date, Ad / Spark link, Hook Text, Hook Style, Status, Spend, Conversions, Revenue, Parent Creative ID, What Changed, Format, Offer, Campaign Style, Notes. For the spend log: Date, Card, What, Amount. For ban history: Date, Ad account, BC, Reason, What was running, Lesson. For a list of names: Ad account and/or BC. Your Daily Journal tab imports too.</p>
+        <p class="note" style="margin-top:12px">Headers it looks for: Date, Ad / Spark link, Hook Text, Hook Style, Status, Spend, Conversions, Revenue, Parent Creative ID, What Changed, Format, Offer, Campaign Style, Notes. For the spend log: Date, Card, What, Amount. For ban history: Date, Ad account, BC, Reason, What was running, Lesson. For a list of names: Ad account and/or BC. Your Daily Journal tab imports too. If your sheet splits details (Creatives tab) from results (Runs tab), import both — they’re matched by Creative ID.</p>
       </section>
     </div>
 
@@ -1457,7 +1677,7 @@ function renderData() {
 
     <section class="panel" style="margin-top:16px">
       <h2>Your data</h2>
-      <p class="note">${plural(state.ads.length, 'ad')}, ${plural(state.spend.length, 'charge')}, ${plural(state.bans.length, 'ban log entry', 'ban log entries')} and ${plural(state.journal.length, 'journal entry', 'journal entries')}, saved in this browser only. Download a backup to move it to another computer or keep it safe.</p>
+      <p class="note">${plural(state.ads.length, 'ad')}, ${plural(state.spend.length, 'charge')}, ${plural(state.bans.length, 'ban log entry', 'ban log entries')}, ${plural(state.journal.length, 'journal entry', 'journal entries')} and ${plural((state.creatives || []).length, 'creative')} in your library, saved in this browser only. Download a backup to move it to another computer or keep it safe.</p>
       <div class="toolbar">
         <button class="btn" id="bk">Download backup</button>
         <button class="btn" id="rs">Restore backup</button>
